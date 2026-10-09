@@ -128,11 +128,17 @@ Ou seja: arte clara não resolve o problema, escolhe qual metade da base quebra.
 Inverter para escuro só trocaria de vítima. Isso é **herdado, não regressão** — o
 fundo do Dokke era #f5f5f7 e tinha exatamente o mesmo buraco.
 
-O que decide e **ainda não foi verificado**: se o Finder desenha algum backdrop
-atrás do rótulo em icon view no tema escuro. Se desenha, não há nada a fazer; se
-não desenha, o conserto é uma pastilha clara só nas duas faixas de rótulo (que já
-são lisas de propósito), não inverter a arte. Fechar isso exige montar o DMG com o
-Mac em tema escuro e olhar — medir cor não prova ausência de backdrop. Por isso a arte nova é um wash
+**Verificado em 2026-10-09: o problema não se materializa.** DMG montado com o
+Mac em tema escuro (`AppleInterfaceStyle = Dark`): o Finder desenha os rótulos
+"Lumen" e "Applications" em texto **escuro**, legíveis, e não com o branco que o
+`NSColor.labelColor` retorna para `darkAqua`. Ou seja, ele não aplica a cor de
+rótulo do sistema a janela com imagem de fundo própria. O cálculo de 1,04:1 estava
+certo na aritmética e errado na premissa — e era por isso que não se podia decidir
+por medição de cor. A arte clara fica como está.
+
+Fica o registro do método, que vale mais que a conclusão: três agentes mediram
+contraste e nenhum dos números respondeu à pergunta. Quem respondeu foi montar o
+DMG e olhar. Por isso a arte nova é um wash
 lavanda (#F7F0FC → branco) com o bloom do Halo atrás da seta, e não a placa
 escura da marca. As faixas onde o Finder desenha ícone e rótulo (x 110–230 e
 x 510–630 até y≈295, ícones de 96px em 170,210 e 570,210) ficam lisas de
