@@ -1,8 +1,13 @@
 # Auditoria de arte binária — rebrand Dokke → Lumen
 
-Status: **arte trocada em 2026-10-08** (task ART-3). Os 29 binários abaixo foram
-reestampados a partir de `assets/branding/lumen-icon.svg` — o Halo roxo, conceito A,
-escolhido pelo Hugo. Antes disso todo arquivo ainda tinha os bytes originais do Dokke.
+Status: **arte trocada em 2026-10-08** (task ART-3). Os 47 binários marcados
+abaixo foram reestampados com o Halo roxo (conceito A, escolhido pelo Hugo). Antes
+disso todo arquivo ainda tinha os bytes originais do Dokke.
+
+A fonte canônica da marca é o **gerador** (`tools/render-brand-icons.mjs`: as
+constantes `G` e `SKINS`), não um arquivo de arte. `assets/branding/lumen-icon.svg`
+é **saída** dele, não entrada — editar esse SVG à mão não tem efeito nenhum e seria
+desfeito na próxima execução.
 
 Reproduzir: `node tools/render-brand-icons.mjs` (chromium do Playwright, que já é
 devDependency — sem `rsvg-convert`, sem ImageMagick, sem dep nova). A saída é
@@ -27,8 +32,8 @@ Legenda: ✅ trocado · ⬜ ainda com arte antiga.
 
 | Arquivo | Para que serve | Onde o usuário vê |
 |---|---|---|
-| ⬜ `mac/dmg-background.png` | Fundo da janela do DMG (`mac/package-dmg.sh:83`, `mac/write-dmg-ds-store.mjs:16`) | Primeira tela ao abrir o DMG baixado |
-| ⬜ `mac/dmg-background.svg` | Fonte vetorial do PNG acima | — (origem) |
+| ✅ `mac/dmg-background.png` | Fundo da janela do DMG (`mac/package-dmg.sh:83`, `mac/write-dmg-ds-store.mjs:16`) | Primeira tela ao abrir o DMG baixado |
+| ✅ `mac/dmg-background.svg` | Fonte vetorial do PNG acima; gerado por `tools/render-dmg-background.mjs` | — (origem) |
 
 ## 3. PWA / web app
 
@@ -37,7 +42,7 @@ Legenda: ✅ trocado · ⬜ ainda com arte antiga.
 | ✅ `public/icon-192.png` | Favicon + `apple-touch-icon` + ícone 192 do manifest | Aba do navegador; ícone na home screen do iPhone/Android |
 | ✅ `public/icon-192-dark.png` | Favicon da variante escura (`public/index.html:13`) | Aba do navegador em tema escuro |
 | ✅ `public/icon-512.png` | Ícone 512 `any maskable` do `manifest.webmanifest` | Splash screen e ícone do PWA instalado |
-| ✅ `public/icon-dock-iOS-Default-1024@1x.png` | Master 1024 do ícone da PWA (validado em `test/brand-icon-assets.test.mjs:45`) | — (origem dos acima) |
+| ✅ `public/icon-dock-iOS-Default-1024@1x.png` | Master 1024 do ícone da PWA (validado em `test/brand-icon-assets.test.mjs:79`) | — (origem dos acima) |
 
 ## 4. Android — APK
 
@@ -53,8 +58,8 @@ Legenda: ✅ trocado · ⬜ ainda com arte antiga.
 |---|---|---|
 | ✅ `docs/public/lumen-favicon.png` | Favicon do site (`docs/index.html:8`, `tutorial-lumen.html:8`) | Aba do navegador no site |
 | ✅ `docs/public/lumen-icon.png` | `apple-touch-icon` do site (`docs/index.html:9`) | Atalho do site na home screen |
-| ✅ `docs/public/lumen-hero.webp` | Ícone grande da hero / capa do tutorial (`docs/src/main.js:8`, `tutorial-lumen.html:752`) | Topo da landing page e do tutorial |
-| ⬜ `docs/assets/lumen-iphone.png` | Screenshot do app rodando num iPhone (`README.md:29`) | Primeira imagem do README no GitHub |
+| ✅ `docs/public/lumen-hero.webp` | Ícone grande da hero / capa do tutorial (`docs/src/main.js:8`, `tutorial-lumen.html:754`) | Topo da landing page e do tutorial |
+| ✅ `docs/assets/lumen-iphone.png` | Abertura do README (`README.md:29`); render da PWA real emoldurado, por `tools/render-readme-shot.mjs` | Primeira imagem do README no GitHub |
 
 ## Decisões tomadas na estampagem
 
@@ -66,27 +71,40 @@ maiores (`smallScale()` no gerador) — mesma estrutura, outra proporção. O te
 entre eles some e o ícone vira um borrão claro, que é exatamente o que o aumento
 deveria evitar. Conferido olhando os PNGs de 16px, não no olho da fé.
 
-**O foreground do Icon Composer sangra até a borda, em 1024×1024.** Sem fundo
-escuro o bloom clareia o centro e núcleo e anel viram uma mancha só — a estrutura
-depende do vão escuro. Em vez de um disco (que deixava os cantos a cargo do
-`fill` e não resolvia o `scale`), o `exec-*.png` leva a placa sangrando: quem
-arredonda é o próprio Icon Composer, e arredondar aqui arredondaria duas vezes.
+**O layer do Icon Composer é só a marca, com alpha — a placa vive no `fill`.**
+Essa é a autoria correta do formato `.icon`: o fundo é declarado no `fill` do
+`icon.json` (`linear-gradient` de #3A0B4F → #140720, as cores de
+`LumenTheme.canvas` e `.page`) e o layer carrega apenas bloom, anel e núcleo
+sobre transparência. O vão escuro entre núcleo e anel aparece porque o `fill`
+está atrás, não porque haja placa assada na imagem.
+
+⚠️ **Não asse a placa dentro do layer.** É o "conserto óbvio" de quem vê o Dark
+sem roxo (ver a seção do Dark abaixo), e já aconteceu duas vezes neste projeto.
+O custo é invisível no Default — fica pixel-idêntico — e silencioso: Clear e
+Tinted viram laje chapada recolorida. `test/brand-icon-assets.test.mjs` trava
+isso medindo o alpha da borda do layer; num teste de mutação esse foi o **único**
+dos cinco asserts do documento que reprovou a regressão, os outros quatro
+passaram. Não "simplifique" esse assert.
 
 O asset é **1024×1024 de propósito** — igual ao canvas de 1024pt do ícone. Com os
 dois do mesmo tamanho, tanto faz se o Icon Composer mapeia pixel-a-ponto ou ajusta
-ao canvas: as duas leituras dão o mesmo resultado, e por isso o transform em
-`icon.json` é **identidade** (`scale: 1`, `translation: [0,0]`), sem constante
-calibrada à mão. Enquanto o asset era 1254px, o `scale: 1.4` e o
-`translation: [2.7, 32.47]` tinham sido ajustados contra a arte do Dokke (conteúdo
-0,641 do canvas, centro 17px acima) e continuaram aplicados depois que a arte mudou
-(Halo: 0,686, centrado) — o halo saía 7% maior e 3,2% baixo.
+ao canvas: as duas leituras dão o mesmo resultado, e por isso o transform é
+**identidade** (`scale: 1`, `translation: [0,0]`), sem constante calibrada à mão.
+Enquanto o asset era 1254px, o `scale: 1.4` e o `translation: [2.7, 32.47]` tinham
+sido ajustados contra a arte do Dokke (conteúdo 0,641 do canvas, centro 17px acima)
+e continuaram aplicados depois que a arte mudou (Halo: 0,686, centrado) — o halo
+saía 7% maior e 3,2% baixo.
 
 **O adaptativo do Android é a decomposição natural do Halo.** A placa virou o
 *background* (sangra até a borda — existe para ser recortada pelo launcher) e o
 halo virou o *foreground*, dimensionado pela zona segura. A arte 1:1 **não** cabe:
 o anel tem raio externo 0,3262 do canvas contra 0,3056 da zona garantida de 66dp.
-O foreground entra a **0,90** (anel em 0,2917, folga de 4,5%); 0,937 seria o fator
+O foreground entra a **0,90**; 0,937 seria o fator
 em que ele encosta exato na borda, e 0,85 encolheria 10% mais que o necessário.
+O anel medido nas cinco densidades fica entre **0,2870 e 0,2963** conforme onde se
+corta o antialias — não exatamente no 0,2936 teórico, porque `smallScale()` engorda
+o anel 3% abaixo de 128px (o mdpi, de 108px, fica *acima* do teórico). Pior caso
+0,2963 contra zona segura 0,3056: 3% de folga, nenhuma densidade corta.
 Isso não era polimento: sem adaptativo, os launchers do Android 8+ aplicam
 tratamento legado por conta própria e põem a placa escura sobre um fundo branco.
 
@@ -95,20 +113,77 @@ depende delas): `mac/AppIcon.iconset/icon_512x512.png` == `public/icon-512.png`;
 `icon_512x512@2x.png` == `Icon-lumen-iOS-Default-1024@1x.png`;
 `docs/public/lumen-icon.png` == `public/icon-512.png`.
 
+**O fundo do DMG é claro, e isso resolve metade do problema — a outra metade
+fica em aberto.** O Finder desenha o nome do ícone com a cor do sistema, que uma
+imagem de fundo estática não acompanha. Medido via AppKit (`NSColor.labelColor`):
+tema claro = preto a 85%, tema escuro = branco a 85%. Contra a faixa do rótulo da
+arte nova (y 262–292, média 253,250,254):
+
+| rótulo | contraste |
+|---|---|
+| preto (tema claro) | 20,3:1 |
+| branco (tema escuro) | **1,04:1 — invisível** |
+
+Ou seja: arte clara não resolve o problema, escolhe qual metade da base quebra.
+Inverter para escuro só trocaria de vítima. Isso é **herdado, não regressão** — o
+fundo do Dokke era #f5f5f7 e tinha exatamente o mesmo buraco.
+
+O que decide e **ainda não foi verificado**: se o Finder desenha algum backdrop
+atrás do rótulo em icon view no tema escuro. Se desenha, não há nada a fazer; se
+não desenha, o conserto é uma pastilha clara só nas duas faixas de rótulo (que já
+são lisas de propósito), não inverter a arte. Fechar isso exige montar o DMG com o
+Mac em tema escuro e olhar — medir cor não prova ausência de backdrop. Por isso a arte nova é um wash
+lavanda (#F7F0FC → branco) com o bloom do Halo atrás da seta, e não a placa
+escura da marca. As faixas onde o Finder desenha ícone e rótulo (x 110–230 e
+x 510–630 até y≈295, ícones de 96px em 170,210 e 570,210) ficam lisas de
+propósito — toda a identidade vive no vão entre os dois ícones.
+
+**O shot do README é render da PWA real, não foto de aparelho.** `tools/
+render-readme-shot.mjs` sobe o servidor num HOME temporário, abre a PWA num
+chromium no viewport de iPhone em paisagem e compõe numa moldura desenhada em
+SVG. Os ícones vêm do iconService do próprio servidor, então a imagem mostra o
+produto de verdade. Limite declarado: o determinismo é **por máquina** — os
+ícones saem do `/Applications` de quem roda, então outro Mac gera bytes
+diferentes. Por isso nenhum teste trava hash dessa imagem.
+
+**A aparência Dark do ícone não é roxa, e isso é do formato.** O `icon.json`
+declara a placa no `fill` (`linear-gradient` de #3A0B4F → #140720) e o layer é
+só a marca, com alpha — que é a autoria correta do `.icon`. Medido com o
+`ictool` (dentro do Icon Composer.app): a rendition **Dark ignora o `fill` por
+completo** e usa material escuro do sistema, qualquer que seja o tipo de fill.
+Não é compromisso nosso: todo app recebe material do sistema nessa aparência.
+
+A tentação é reassar a placa dentro do layer para "consertar" o Dark. Medimos:
+isso mata a marca — no Dark o brilho do halo vem do backdrop do sistema
+atravessando o material, e uma placa opaca atrás derruba o núcleo de 0.92 para
+0.14 de luminância. Como o núcleo já é branco na fonte, nenhuma arte mais clara
+resolve. E custaria Clear/Tinted virarem laje chapada. O estado atual mantém a
+marca legível em 6/6 aparências; só a placa do Dark é do sistema.
+
+Duas limitações do formato, confirmadas e não contornáveis: o `fill` **não
+aceita radial** (o parser enumera `orientation`, `solid`, `linear-gradient`,
+`automatic-gradient`; três sintaxes radiais plausíveis foram rejeitadas), então
+a composição do `.icon` é linear enquanto os 6 exports standalone continuam
+radiais; e `fill-specializations` é **ignorado em silêncio** — o parser descarta
+chave desconhecida de topo sem erro, então "não deu erro" nunca prova que
+funcionou ali.
+
 ## Pendências conhecidas
 
-- **`fill` por aparência no `icon.json`.** O foreground é opaco e cobre o
-  `fill: automatic`, então as aparências Clear/Tinted mostram a placa roxa em vez da
-  composição do sistema. Resolver de verdade é tirar a placa do layer e declarar o
-  gradiente no `fill` — não fiz porque não dá para conferir o schema nem o resultado
-  sem o Icon Composer no macOS 26. Os 6 exports standalone de 1024 não passam por esse
-  caminho e continuam corretos.
-- `docs/assets/lumen-iphone.png` é um **screenshot**, não um ícone: só fica correto
-  depois que a UI/arte da PWA mudar — refazer por último.
-- `mac/dmg-background.png` / `.svg`: fundo do instalador, ainda com arte Dokke.
-- Nenhum desses binários contém a string "Dokke"; o risco é puramente visual.
+- **`actool` está quebrado nesta máquina — e isso não é cosmético.** Ele falha na
+  inicialização até em `actool --version` ("A required plugin failed to load",
+  "ibtoold failed IDE initialization"), inclusive no template de ícone da própria
+  Apple, o que prova que é ambiente e não a nossa arte. Conserto:
+  `sudo xcodebuild -runFirstLaunch` (precisa de admin). **Colateral:** enquanto
+  isso, `mac/install.sh` cai no fallback do `.icns` legado e o ícone adaptativo do
+  Icon Composer **nunca compila nesta máquina** — o Mac mostra o ícone antigo mesmo
+  com a arte nova no repo. A suíte não depende de `actool` de propósito.
+- Toda a arte binária do Dokke foi substituída. Nenhum binário continha a string
+  "Dokke"; o risco era puramente visual e está fechado.
 - `test/brand-icon-assets.test.mjs` passou a medir geometria em vez de travar sha256, e
   ganhou dois testes para o adaptativo (camadas declaradas + halo dentro da zona segura).
   Validados contra negativos: arte 1:1 reprova por estourar a zona, 0,70 reprova por
-  encolher demais. Dono do arquivo é o Crivo — os dois testes novos estão prontos para ele
-  assumir. `test/package-dmg.test.mjs` e `test/mac-icon-appearance.test.mjs` continuam verdes.
+  encolher demais. O Crivo assumiu o arquivo e acrescentou o contrato do documento
+  Icon Composer; `test/brand-art-pixels.test.mjs` (novo) mede o fundo do DMG e o shot
+  do README sem precisar montar o DMG, fechando a lacuna de a arte só ser verificada
+  com o fixture ligado. Suíte: **494 testes, 494 pass, 0 fail, 0 skip**.

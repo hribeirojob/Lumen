@@ -2,11 +2,52 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import test from "node:test";
+import test, { after, before } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sourceDir = path.join(root, "assets", "branding", "lumen-icon");
+
+// Documento do Icon Composer: a placa é o `fill` do documento e o layer é SÓ a
+// marca, com alpha. É sutil e já regrediu duas vezes: quem vê o Dark sem roxo
+// tende a "consertar" assando a placa dentro do layer — e aí Clear e Tinted
+// viram laje chapada sem ninguém perceber. Por isso tem contrato próprio.
+const DOCUMENTO = "assets/branding/lumen-icon/Lumen.icon";
+
+let browser;
+let page;
+
+before(async () => {
+  const { chromium } = await import("playwright");
+  browser = await chromium.launch({ headless: true });
+  page = await browser.newPage();
+});
+
+after(async () => { if (browser) await browser.close(); });
+
+function documento() {
+  const dir = path.join(root, DOCUMENTO);
+  const json = JSON.parse(readFileSync(path.join(dir, "icon.json"), "utf8"));
+  const layers = (json.groups ?? []).flatMap(g => g.layers ?? []);
+  return { dir, json, layers };
+}
+
+function corDaEscala(nome) {
+  const theme = readFileSync(path.join(root, "mac", "Sources", "LumenTheme.swift"), "utf8");
+  const m = theme.match(new RegExp(`static let ${nome} = Color\\(red: ([\\d.]+), green: ([\\d.]+), blue: ([\\d.]+)\\)`));
+  assert.ok(m, `LumenTheme.${nome} precisa existir para ancorar a cor do ícone`);
+  return m.slice(1, 4).map(v => Math.round(Number(v) * 255));
+}
+
+const perto = (a, b, folga) => a.every((c, i) => Math.abs(c - b[i]) <= folga);
+
+const luminancia = ([r, g, b]) => {
+  const linear = c => {
+    const v = c / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+};
 
 const sourceVariants = [
   "Icon-lumen-iOS-ClearDark-1024@1x.png",
@@ -90,10 +131,7 @@ test("o launcher de 192 é o mesmo arquivo que o ícone do PWA", () => {
 });
 
 test("as cinco densidades do launcher desenham a mesma marca", async () => {
-  const { chromium } = await import("playwright");
-  const browser = await chromium.launch({ headless: true });
-  try {
-    const page = await browser.newPage();
+  {
     const perfis = new Map();
     for (const [densidade, tamanho] of densidadesAndroid) {
       const b64 = readFileSync(launcher(densidade)).toString("base64");
@@ -157,7 +195,7 @@ test("as cinco densidades do launcher desenham a mesma marca", async () => {
           + "— ícone gerado de um master fora da escala Lumen");
       });
     }
-  } finally { await browser.close(); }
+  }
 });
 
 test("o AppIcon do macOS contém todas as escalas e o icns regenerado", () => {
@@ -232,10 +270,7 @@ test("o Android declara o ícone adaptativo com as três camadas", () => {
 });
 
 test("o halo do adaptativo cabe na zona segura e o fundo sangra", async () => {
-  const { chromium } = await import("playwright");
-  const browser = await chromium.launch({ headless: true });
-  try {
-    const page = await browser.newPage();
+  {
     const medir = async (arquivo, tamanho) => {
       const b64 = readFileSync(arquivo).toString("base64");
       return page.evaluate(async ([b64, tamanho]) => {
@@ -284,5 +319,138 @@ test("o halo do adaptativo cabe na zona segura e o fundo sangra", async () => {
       assert.deepEqual(mono.tons, ["255,255,255"],
         `${densidade}: o monochrome é silhueta de cor única — quem pinta é o sistema`);
     }
-  } finally { await browser.close(); }
+  }
+});
+
+// ---------- documento do Icon Composer ----------
+//
+// A autoria aqui é dividida de propósito: a PLACA é o `fill` do documento e o
+// LAYER é só a marca, com alpha. O Icon Composer usa essa separação para
+// recompor o ícone por aparência — Clear e Tinted descartam a placa e ficam só
+// com a marca. Assar a placa dentro do layer deixa o Default igualzinho e
+// destrói as outras renditions em silêncio, que é por onde isso já regrediu
+// duas vezes.
+//
+// A rendition real sai do ictool (Xcode), que é lento e depende de ambiente;
+// conferi contra ele que compor o fill com o layer aqui reproduz o renderizador
+// dentro de 0.005 de luminância. Então o contrato mede os arquivos versionados.
+
+const RAIOS_DA_MARCA = { nucleo: 0, vao: 0.35, anel: 0.55, chao: 0.8 };
+
+test("o documento tem um único layer, que é a marca", () => {
+  const { layers } = documento();
+  assert.equal(layers.length, 1,
+    "um layer extra normalmente é a placa entrando por outro caminho");
+});
+
+test("o layer é transparente na borda e opaco no núcleo", async () => {
+  const { dir, layers } = documento();
+  const arquivo = path.join(dir, "Assets", layers[0]["image-name"]);
+  assert.ok(existsSync(arquivo), `o layer aponta para ${layers[0]["image-name"]}, que não existe`);
+
+  const b64 = readFileSync(arquivo).toString("base64");
+  const alfa = await page.evaluate(async b64 => {
+    const img = new Image();
+    img.src = "data:image/png;base64," + b64;
+    await img.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0);
+    const dados = ctx.getImageData(0, 0, img.width, img.height).data;
+    const a = (x, y) => dados[(y * img.width + x) * 4 + 3];
+    const margem = Math.round(img.width * 0.02);
+    let borda = 0, vazios = 0, total = 0;
+    for (let y = 0; y < img.height; y++) {
+      for (let x = 0; x < img.width; x++) {
+        if (x < margem || y < margem || x >= img.width - margem || y >= img.height - margem) {
+          borda = Math.max(borda, a(x, y));
+        }
+      }
+    }
+    for (let y = 0; y < img.height; y += 4) {
+      for (let x = 0; x < img.width; x += 4) { total++; if (a(x, y) === 0) vazios++; }
+    }
+    return { borda, centro: a(img.width >> 1, img.height >> 1), vazio: vazios / total };
+  }, b64);
+
+  // ESTE é o assert que pega a regressão: placa assada no layer enche a borda
+  assert.equal(alfa.borda, 0,
+    `a borda do layer tem alpha ${alfa.borda}: a placa foi assada dentro da marca, `
+    + "e Clear/Tinted viram laje chapada");
+  assert.ok(alfa.vazio >= 0.4,
+    `só ${(alfa.vazio * 100).toFixed(0)}% do layer é vazio: isso é placa, não marca`);
+  assert.equal(alfa.centro, 255, "o núcleo da marca precisa ser opaco");
+});
+
+test("a placa é o fill do documento, nas cores da escala Lumen", () => {
+  const { json } = documento();
+  const paradas = json.fill?.["linear-gradient"];
+  assert.ok(Array.isArray(paradas), "sem fill no documento a placa teria que vir do layer");
+  assert.equal(paradas.length, 2, "a placa é um gradiente de duas paradas");
+
+  const canais = parada => {
+    const m = /^srgb:([\d.]+),([\d.]+),([\d.]+)/.exec(parada);
+    assert.ok(m, `parada em formato inesperado: ${parada}`);
+    return m.slice(1, 4).map(v => Math.round(Number(v) * 255));
+  };
+  for (const [i, nome] of [[0, "canvas"], [1, "page"]]) {
+    const esperado = corDaEscala(nome);
+    assert.ok(perto(canais(paradas[i]), esperado, 2),
+      `parada ${i} da placa está em ${canais(paradas[i])} e LumenTheme.${nome} é ${esperado}`);
+  }
+});
+
+test("o layer fica em transform identidade", () => {
+  const { layers } = documento();
+  const posicao = layers[0].position ?? {};
+  assert.equal(posicao.scale, 1, "escala calibrada à mão desenquadra o halo");
+  assert.deepEqual(posicao["translation-in-points"], [0, 0],
+    "translação calibrada à mão desenquadra o halo");
+  assert.equal(layers[0].hidden, false, "o layer da marca não pode estar oculto");
+});
+
+test("as faixas da marca sobrevivem à composição sobre a placa", async () => {
+  const { dir, json, layers } = documento();
+  assert.ok(json.fill?.["linear-gradient"],
+    "sem a placa no fill não há sobre o que compor a marca");
+  const paradas = json.fill["linear-gradient"].map(p => {
+    const m = /^srgb:([\d.]+),([\d.]+),([\d.]+)/.exec(p);
+    return m.slice(1, 4).map(v => Math.round(Number(v) * 255));
+  });
+  const b64 = readFileSync(path.join(dir, "Assets", layers[0]["image-name"])).toString("base64");
+
+  const faixas = await page.evaluate(async ([b64, paradas, raios]) => {
+    const img = new Image();
+    img.src = "data:image/png;base64," + b64;
+    await img.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext("2d");
+    const grad = ctx.createLinearGradient(0, 0, 0, img.height);
+    grad.addColorStop(0, `rgb(${paradas[0].join(",")})`);
+    grad.addColorStop(1, `rgb(${paradas[1].join(",")})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, img.width, img.height);
+    ctx.drawImage(img, 0, 0);
+    const dados = ctx.getImageData(0, 0, img.width, img.height).data;
+    const centro = (img.width - 1) / 2;
+    const px = f => {
+      const i = (Math.round(centro) * img.width + Math.round(centro + f * centro)) * 4;
+      return [dados[i], dados[i + 1], dados[i + 2]];
+    };
+    return Object.fromEntries(Object.entries(raios).map(([nome, f]) => [nome, px(f)]));
+  }, [b64, paradas, RAIOS_DA_MARCA]);
+
+  const luz = Object.fromEntries(Object.entries(faixas).map(([k, v]) => [k, luminancia(v)]));
+  assert.ok(luz.nucleo >= 0.6, `núcleo em ${luz.nucleo.toFixed(2)}: a marca sumiu sobre a placa`);
+  assert.ok(luz.vao <= luz.nucleo - 0.4, "sem vão escuro separando o núcleo do anel");
+  assert.ok(luz.anel >= luz.vao + 0.15, "o anel não se destaca do vão");
+  assert.ok(luz.chao <= luz.anel - 0.15, "a placa não se destaca do anel");
+
+  const accentHi = corDaEscala("accentHi");
+  assert.ok(perto(faixas.anel, accentHi, 3),
+    `o anel está em ${faixas.anel} e accent-hi é ${accentHi}`);
 });

@@ -10,7 +10,6 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, '..');
 const scriptPath = path.join(projectRoot, 'mac', 'package-dmg.sh');
 const installScriptPath = path.join(projectRoot, 'mac', 'install.sh');
-const backgroundSvgPath = path.join(projectRoot, 'mac', 'dmg-background.svg');
 const backgroundFileName = 'dmg-background.png';
 const skipDmgFixture = process.env.LUMEN_SKIP_DMG_FIXTURE === '1'
   ? { skip: 'CI validates the built DMG after the general test suite' }
@@ -130,14 +129,23 @@ test('@spec:AC-003 Applications é symlink nativo para /Applications', macOnly, 
   assert.equal(fs.readlinkSync(applications), '/Applications');
 });
 
-test('@spec:AC-004 seta fica no fundo e não na raiz', macOnly, async () => {
+// A ARTE do fundo não mora mais aqui: ela era verificada por `#f5f5f7` e pelo
+// path da seta no SVG — literais que não distinguem a arte certa de um retângulo
+// e que, pior, só rodavam com o fixture do DMG montado (desligado por padrão via
+// LUMEN_SKIP_DMG_FIXTURE), ou seja, não rodavam em CI nenhuma. A medição de
+// pixel não precisa de montagem e vive em test/brand-art-pixels.test.mjs.
+// Aqui fica só o que depende mesmo do DMG: o arquivo chegar e o DS_Store apontar.
+test('@spec:AC-004 fundo é entregue em .background e referenciado pelo DS_Store', macOnly, async () => {
   const current = await getFixture();
   const background = path.join(current.mountPoint, '.background', backgroundFileName);
-  const backgroundSpec = fs.readFileSync(backgroundSvgPath, 'utf8');
-  assert.ok(fs.existsSync(background));
-  assert.match(backgroundSpec, /#f5f5f7/);
-  assert.match(backgroundSpec, /M300 210 H420/);
-  assert.ok(dsStore(current.mountPoint).includes(Buffer.from('.background')));
+  assert.ok(fs.existsSync(background), 'o fundo não chegou em .background/ dentro do DMG');
+  assert.deepEqual(
+    fs.readFileSync(background),
+    fs.readFileSync(path.join(projectRoot, 'mac', backgroundFileName)),
+    'o fundo embarcado no DMG tem que ser o mesmo arquivo versionado no repo',
+  );
+  assert.ok(dsStore(current.mountPoint).includes(Buffer.from('.background')),
+    'o DS_Store precisa apontar para a pasta do fundo');
 });
 
 test('@spec:AC-005 posições persistem à esquerda e à direita', macOnly, async () => {
