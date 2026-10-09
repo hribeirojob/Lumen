@@ -1,7 +1,13 @@
-// Rasteriza assets/branding/lumen-icon.svg nos tamanhos exatos de cada alvo.
+// Gera TODA a arte de marca do Lumen nos tamanhos exatos de cada alvo.
 // Usa o chromium do Playwright (ja e devDependency) — nada de rsvg/ImageMagick.
 //   node tools/render-brand-icons.mjs [--out <dir>] [--check]
 // --check escreve tambem _check/ com o recorte circular do adaptativo Android.
+//
+// A FONTE DA MARCA E ESTE ARQUIVO: a geometria em G e as cores em SKINS. O
+// assets/branding/lumen-icon.svg e uma SAIDA deste gerador, nao uma entrada —
+// nenhum codigo aqui le aquele arquivo. Para mudar a marca, edite G/SKINS e
+// rode o gerador; editar o .svg a mao nao tem efeito nenhum e a alteracao
+// seria desfeita na proxima execucao.
 import { chromium } from "playwright";
 import { mkdir, writeFile, copyFile } from "node:fs/promises";
 import path from "node:path";
@@ -11,7 +17,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outArg = process.argv.indexOf("--out");
 const OUT = outArg > 0 ? path.resolve(process.argv[outArg + 1]) : root;
 
-// Geometria do Halo, em unidades do viewBox 1024. Fonte: assets/branding/lumen-icon.svg.
+// Geometria do Halo, em unidades do viewBox 1024. Fonte canonica da marca.
 const G = { plate: 32, plateSize: 960, radius: 216, bloom: 338, ring: 282, ringW: 104, core: 120 };
 
 // Paletas por aparencia. Default/Dark vem da nota palette-lumen; Clear e Tinted
@@ -52,7 +58,7 @@ function smallScale(size){
 // layer "mono": silhueta de cor unica para o icone tematico do Android 13+. Sem
 //   bloom de proposito — o sistema pinta por alpha, e o gradiente do bloom vira
 //   um borrao cinza em vez de glow.
-function svg({ skin = "Default", size, plate = "rounded", scale = 1, layer = "full" } = {}){
+function svg({ skin = "Default", size, plate = "rounded", scale = 1, layer = "full", aria = "" } = {}){
   const s = SKINS[skin];
   const k = smallScale(size);
   const core = Math.round(G.core * k.core);
@@ -72,7 +78,9 @@ function svg({ skin = "Default", size, plate = "rounded", scale = 1, layer = "fu
   <circle cx="512" cy="512" r="${G.ring}" fill="none" stroke="${s.ring}" stroke-width="${ringW}"/>
   <circle cx="512" cy="512" r="${core}" fill="url(#la-core)"/>`;
   const haloLayer = layer === "none" ? "" : `${open}${halo}${close}`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="${size}" height="${size}">
+  // rotulo so no SVG de referencia; os PNGs ja sao descritos por quem os usa.
+  const a11y = aria ? ` role="img" aria-label="${aria}"` : "";
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="${size}" height="${size}"${a11y}>
   <defs>
     <radialGradient id="la-plate" cx="50%" cy="36%" r="80%">
       <stop offset="0" stop-color="${s.p0}"/><stop offset="1" stop-color="${s.p1}"/>
@@ -121,7 +129,14 @@ const ANDROID_ADAPTIVE = [["mdpi", 108], ["hdpi", 162], ["xhdpi", 216], ["xxhdpi
 // O anel do Halo tem raio externo (282 + 104/2)/1024 = 0.3262 do canvas. A zona
 // segura do adaptativo e 66/108/2 = 0.3056. A arte 1:1 NAO cabe: o anel passa
 // 6.7% da zona e o launcher corta. 0.937 e o fator em que o anel encosta exato na
-// borda; 0.90 poe o anel em 0.2936 e deixa folga real sem encolher o icone a toa.
+// borda; 0.90 deixa folga real sem encolher o icone a toa.
+//
+// 0.2936 e o raio TEORICO depois do fator. O medido nos PNGs gerados nao e esse
+// numero exato, porque smallScale() engorda o anel em 3% abaixo de 128px e o
+// rasterizador arredonda: medindo os cinco foregrounds, o raio externo fica entre
+// 0.2870 e 0.2963 do canvas (o piso e lendo ate o centro do ultimo pixel, o teto
+// ate a borda externa dele; mdpi fica ACIMA do teorico, nao abaixo). O pior caso,
+// 0.2963, ainda guarda 3% de folga para a zona segura — nenhuma densidade corta.
 const ADAPTIVE_SCALE = 0.90;
 
 const browser = await chromium.launch({ headless: true });
@@ -142,9 +157,14 @@ try {
   // nao importa se o Icon Composer mapeia pixel-a-ponto ou ajusta ao canvas — as
   // duas leituras dao o mesmo resultado. Por isso o transform em icon.json pode
   // ser identidade (scale 1, translation 0,0), sem constante calibrada a mao.
-  // Placa sangrando: quem arredonda e o proprio Icon Composer.
+  //
+  // plate:"none" e obrigatorio aqui. Um layer OPACO que sangra ate a borda cobre
+  // o fundo do documento, e as aparencias Clear e Tinted passam a mostrar a placa
+  // recolorida em vez da composicao do sistema. A placa agora e declarada no campo
+  // "fill" do icon.json (linear-gradient de dois stops) — o layer so carrega o
+  // halo, com alpha, que e o que o sistema precisa para montar vidro e tint.
   await put("assets/branding/lumen-icon/Lumen.icon/Assets/exec-ec4df0b2-9e7a-491c-bf6b-ca9c2a65f8e0.png",
-    await shoot(page, svg({ size: 1024, plate: "bleed" }), 1024));
+    await shoot(page, svg({ size: 1024, plate: "none" }), 1024));
 
   // ---- PWA ----
   const i512 = await shoot(page, svg({ size: 512 }), 512);
@@ -178,6 +198,13 @@ try {
     await put(`${dir}/ic_launcher_monochrome.png`,
       await shoot(page, svg({ size, plate: "none", scale: ADAPTIVE_SCALE, layer: "mono" }), size));
   }
+
+  // ---- SVG de referencia ----
+  // Emitido, nao lido: e o retrato legivel da marca (skin Default, placa
+  // arredondada) para quem precisa do vetor. Sair daqui e o que impede o .svg de
+  // divergir de G/SKINS em silencio.
+  await put("assets/branding/lumen-icon.svg",
+    svg({ size: 1024, aria: "Lumen - halo roxo" }) + "\n");
 
   // ---- docs ----
   await put("docs/public/lumen-icon.png", i512);

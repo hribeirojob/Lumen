@@ -25,6 +25,9 @@ ios/Lumen.xcodeproj/xcuserdata/
 .spec/
 onpspec.config.json
 
+# Conferencia local da zona segura do adaptativo (node tools/render-brand-icons.mjs --check)
+_check/
+
 # Página de instalação (artefatos locais do Vite)
 docs/dist/
 .vercel/

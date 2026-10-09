@@ -1,8 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Lumen - halo roxo">
   <defs>
     <radialGradient id="la-plate" cx="50%" cy="36%" r="80%">
-      <stop offset="0" stop-color="#3A0B4F"/>
-      <stop offset="1" stop-color="#140720"/>
+      <stop offset="0" stop-color="#3A0B4F"/><stop offset="1" stop-color="#140720"/>
     </radialGradient>
     <radialGradient id="la-bloom" cx="50%" cy="50%" r="50%">
       <stop offset="0" stop-color="#D9A8EC" stop-opacity="0.55"/>
@@ -10,8 +9,7 @@
       <stop offset="1" stop-color="#AD56D3" stop-opacity="0"/>
     </radialGradient>
     <radialGradient id="la-core" cx="42%" cy="36%" r="72%">
-      <stop offset="0" stop-color="#FFFFFF"/>
-      <stop offset="1" stop-color="#F0DCFA"/>
+      <stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#F0DCFA"/>
     </radialGradient>
   </defs>
   <rect x="32" y="32" width="960" height="960" rx="216" fill="url(#la-plate)"/>
