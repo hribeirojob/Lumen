@@ -163,6 +163,70 @@ validate_bundle_budget() {
   echo "==> bundle budget OK (${bundle_kib} KiB <= ${MAX_BUNDLE_SIZE_MB} MiB; one Node runtime)"
 }
 
+# Caminho canônico de um .app (resolve symlink e caminho relativo). Se o
+# caminho não existe, devolve ele mesmo — quem chama já filtrou por -e.
+canonical_app_path() {
+  ( cd "$1" >/dev/null 2>&1 && pwd -P ) || printf '%s' "$1"
+}
+
+app_mtime() {
+  stat -f '%Sm' -t '%Y-%m-%d %H:%M' "$1" 2>/dev/null || echo "data desconhecida"
+}
+
+# O script antes imprimia "Only one copy" incondicionalmente, sem nunca ter
+# olhado o disco: instalando em ~/Applications ele ignorava /Applications (e o
+# contrário com --system), então duas cópias conviviam — uma delas com arte
+# antiga — enquanto a mensagem dizia que estava tudo certo. Aqui a afirmação só
+# sai depois da verificação; achando outra cópia, o script diz onde está e o que
+# remover, e NÃO remove nada por conta própria.
+report_app_copies() {
+  local installed="$1" candidate canonical_installed
+  local -a others=()
+  canonical_installed="$(canonical_app_path "${installed}")"
+
+  for candidate in \
+    "/Applications/${APP_NAME}.app" \
+    "${HOME}/Applications/${APP_NAME}.app" \
+    "${ROOT}/dist/${APP_NAME}.app"
+  do
+    [[ -e "${candidate}" ]] || continue
+    [[ "$(canonical_app_path "${candidate}")" == "${canonical_installed}" ]] && continue
+    others+=("${candidate}")
+  done
+
+  if [[ "${#others[@]}" -eq 0 ]]; then
+    echo "Verificado: só existe esta cópia. Open via Spotlight: ${APP_NAME}"
+    return 0
+  fi
+
+  echo "warn: existem ${#others[@]} outra(s) cópia(s) de ${APP_NAME}.app no disco." >&2
+  echo "warn: o Spotlight e o Launchpad podem abrir a cópia errada — foi assim que" >&2
+  echo "warn: uma instalação antiga, com o ícone velho, passou por atual." >&2
+  echo "warn: recém-instalada  -> ${installed} ($(app_mtime "${installed}"))" >&2
+  for candidate in "${others[@]}"; do
+    echo "warn: cópia a remover -> ${candidate} ($(app_mtime "${candidate}"))" >&2
+  done
+  echo "warn: remova com:" >&2
+  for candidate in "${others[@]}"; do
+    printf 'warn:   rm -rf %q\n' "${candidate}" >&2
+  done
+  return 0
+}
+
+# O server embutido só sobe com a dependência ws. Sem esta checagem o script
+# podia imprimir "OK installed" depois de um npm ci que falhou, entregando um
+# app que abre e nunca conecta.
+report_runtime_health() {
+  local installed="$1"
+  if [[ -d "${installed}/Contents/Resources/${APP_NAME}/node_modules/ws" ]]; then
+    return 0
+  fi
+  echo "warn: ws ausente em ${installed}/Contents/Resources/${APP_NAME}/node_modules" >&2
+  echo "warn: o app abre mas o server não sobe. Rode o install.sh de novo com npm" >&2
+  echo "warn: funcionando, ou confira o erro do npm ci acima." >&2
+  return 0
+}
+
 for arg in "$@"; do
   case "$arg" in
     --system) DEST_DIR="/Applications" ;;
@@ -215,9 +279,9 @@ cp "${BIN_PATH}" "${APP_BUNDLE}/Contents/MacOS/${BIN_NAME}"
 chmod +x "${APP_BUNDLE}/Contents/MacOS/${BIN_NAME}"
 cp "${ROOT}/Info.plist" "${APP_BUNDLE}/Contents/Info.plist"
 # O .icns mantém compatibilidade com sistemas anteriores ao Icon Composer.
-if [[ -f "${ROOT}/AppIcon.icns" ]]; then
-  cp "${ROOT}/AppIcon.icns" "${APP_BUNDLE}/Contents/Resources/Lumen.icns"
-else
+# Aqui só validamos a existência, para falhar cedo: a cópia em si acontece
+# DEPOIS do actool — ver o comentário no bloco do ícone adaptativo.
+if [[ ! -f "${ROOT}/AppIcon.icns" ]]; then
   echo "error: legacy icon missing: ${ROOT}/AppIcon.icns" >&2
   exit 1
 fi
@@ -247,6 +311,20 @@ else
   echo "warn: actool ausente — usando Lumen.icns; o ícone adaptativo exige Xcode 26."
 fi
 
+# O --compile --app-icon do actool ESCREVE o próprio Lumen.icns em Resources,
+# sobrescrevendo o que viesse antes. O icns dele para em 128@2x (256px), porque
+# o Assets.car adaptativo cobre o resto — mas o Assets.car só vale do macOS 26
+# em diante, e aqui o alvo é --minimum-deployment-target 14.0. Em Sonoma e
+# Sequoia o sistema cai no icns e escalaria tudo a partir de 256px: Dock grande,
+# Cmd+Tab, Get Info e Finder em ícone grande saem borrados.
+# Por isso o icns completo (10 tamanhos, até 512@2x) é copiado DEPOIS do actool.
+# Os dois convivem: macOS 26 usa o Assets.car, macOS 14/15 usa o icns.
+cp "${ROOT}/AppIcon.icns" "${APP_BUNDLE}/Contents/Resources/Lumen.icns"
+if [[ ! -s "${APP_BUNDLE}/Contents/Resources/Lumen.icns" ]]; then
+  echo "error: Lumen.icns ausente ou vazio após a cópia legada" >&2
+  exit 1
+fi
+
 # pack do server no bundle (Contents/Resources/Lumen/) — sem isso o app instalado
 # não acha o server.js (cwd do Launchpad é /) e o dock morre offline.
 SRV_DIR="${APP_BUNDLE}/Contents/Resources/Lumen"
@@ -263,8 +341,12 @@ chmod +x "${ICON_HELPER_APP}/Contents/MacOS/LumenIconHelper"
 bash "${ROOT}/copy-public-assets.sh" "${ROOT}/../public" "${SRV_DIR}/public"
 cp "${ROOT}/../package.json" "${ROOT}/../package-lock.json" "${SRV_DIR}/"
 if command -v npm >/dev/null 2>&1; then
-  (cd "${SRV_DIR}" && npm ci --omit=dev >/dev/null 2>&1) \
-    || echo "warn: npm ci falhou — server pode não subir (dependência ws ausente)"
+  # A saída do npm era descartada com >/dev/null 2>&1, então "npm ci falhou"
+  # chegava sem nenhuma pista do motivo. Agora o erro real aparece.
+  if ! npm_ci_log="$(cd "${SRV_DIR}" && npm ci --omit=dev 2>&1)"; then
+    echo "warn: npm ci falhou — server pode não subir (dependência ws ausente)" >&2
+    printf '%s\n' "${npm_ci_log}" | tail -20 >&2
+  fi
 elif [ -d "${ROOT}/../node_modules" ]; then
   cp -R "${ROOT}/../node_modules" "${SRV_DIR}/node_modules"
 else
@@ -361,16 +443,21 @@ rm -rf "${ROOT}/dist/${APP_NAME}.app"
 mkdir -p "${DEST_DIR}"
 INSTALL_PATH="${DEST_DIR}/${APP_NAME}.app"
 echo "==> install ${INSTALL_PATH}"
+# Uma linha só: o `rm -rf "${DEST_DIR}/Lumen.app"` que existia aqui apagava
+# exatamente o mesmo caminho que ${INSTALL_PATH} (APP_NAME="Lumen"), era código
+# morto e dava a impressão de que o script limpava o outro domínio. Não limpava.
 rm -rf "${INSTALL_PATH}"
-rm -rf "${DEST_DIR}/Lumen.app" 2>/dev/null || true
 cp -R "${APP_BUNDLE}" "${INSTALL_PATH}"
 
 if command -v xattr >/dev/null 2>&1; then
+  # Legítimo: o atributo de quarentena normalmente nem existe numa cópia local,
+  # e a ausência dele não é falha. Nada aqui é afirmado depois.
   xattr -dr com.apple.quarantine "${INSTALL_PATH}" 2>/dev/null || true
 fi
 
 echo "OK installed: ${INSTALL_PATH}"
-echo "Only one copy. Open via Spotlight: Lumen"
+report_runtime_health "${INSTALL_PATH}"
+report_app_copies "${INSTALL_PATH}"
 
 if [[ "${OPEN_AFTER}" -eq 1 ]]; then
   open "${INSTALL_PATH}"
