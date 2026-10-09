@@ -90,10 +90,10 @@ test("macOS release is manually dispatched from main and validates a main tag", 
   assert.match(releaseWorkflow, /pattern:\s*['"]\*['"]/);
   assert.match(releaseWorkflow, /Lumen-macOS\.dmg/);
   assert.match(releaseWorkflow, /lumen\.apk/);
-  assert.match(releaseWorkflow, /dump badging public\/lumen\.apk/);
   assert.match(releaseWorkflow, /"\$\{apksigner\}" verify --print-certs/);
-  assert.match(releaseWorkflow, /\(cd public && shasum -a 256 lumen\.apk > lumen\.apk\.sha256\)/);
-  assert.doesNotMatch(releaseWorkflow, /shasum -a 256 public\/lumen\.apk > public\/lumen\.apk\.sha256/);
+  // badging, assinatura e checksum do APK saíram daqui: eram três literais com o
+  // caminho public/ cravado, e o APK deixou o git. O contrato deles virou o teste
+  // "o preflight valida o MESMO APK que publica", abaixo, que não fixa caminho.
   assert.match(releaseWorkflow, /previous_version_code/);
   assert.match(releaseWorkflow, /previous_signers/);
   assert.match(releaseWorkflow, /android_version_code/);
@@ -282,8 +282,14 @@ test("release guard tolerates a repository without any previous release without 
   assert.equal(firstRelease.length, 2, "both jobs must detect the first release of the repository");
   assert.match(releaseWorkflow, /releases" --jq 'length'/);
   assert.match(releaseWorkflow, /could not resolve the latest published release/);
-  const downloads = [...releaseWorkflow.matchAll(/gh release download/g)].map(({ index }) => index);
-  assert.equal(downloads.length, 2, "each job downloads the previous APK exactly once");
+  // Conta só os downloads da RELEASE ANTERIOR — identificados pela tag vir de uma
+  // variável `*_release_tag`. O workflow também baixa o APK de staging, que é
+  // outro artefato e não pertence a esta guarda; contar `gh release download`
+  // cru confundia os dois e quebrava a cada artefato novo no pipeline.
+  const downloads = [...releaseWorkflow.matchAll(/gh release download\s+"\$\{\w*release_tag\}"/g)]
+    .map(({ index }) => index);
+  assert.equal(downloads.length, 2,
+    "each job downloads the previous APK exactly once");
   for (const index of downloads) {
     const guard = releaseWorkflow.lastIndexOf('if [[ "${first_release}" == "no" ]]; then', index);
     assert.ok(guard >= 0 && index - guard < 200, "the previous-release download must sit inside the first_release guard");
@@ -299,4 +305,101 @@ test("the transition manifest, when present, declares one tag and both applicati
   assert.notEqual(manifest.fromPackage, manifest.toPackage);
   assert.ok(manifest.reason.length > 0, "the bypass must record why it was granted");
   assert.match(manifest.previousApkAsset, /\.apk$/);
+});
+
+// O preflight do APK era travado por três literais com `public/` cravado:
+// `dump badging public/lumen.apk`, `(cd public && shasum -a 256 lumen.apk ...)`
+// e um doesNotMatch contra a forma errada do shasum. Isso fixa a STRING, não o
+// contrato — e o APK está saindo do git, então o caminho vai mudar.
+//
+// O que importa de verdade e não depende de onde o arquivo mora:
+//   1. badging, assinatura e checksum recaem sobre o MESMO artefato. Validar um
+//      arquivo e publicar outro é a falha que um literal por linha não enxerga.
+//   2. o .sha256 guarda o nome NU do arquivo. Era esse o motivo do doesNotMatch:
+//      `shasum -a 256 public/lumen.apk` grava "public/lumen.apk" dentro do
+//      .sha256, e o `sha256sum -c` roda ao lado do artefato, onde esse caminho
+//      não existe. O `cd` antes do shasum é o que mantém o nome relativo.
+
+const semAspas = (texto) => texto.replace(/["']/g, "");
+
+/**
+ * O workflow nomeia o artefato numa variável (`apk_path="${RUNNER_TEMP}/..."`) e
+ * usa a variável nos comandos. Comparar strings cruas diria que badging e
+ * checksum tratam de arquivos diferentes quando tratam do mesmo. Aqui as
+ * atribuições do próprio YAML são resolvidas antes de comparar — é assim que um
+ * humano lê o arquivo.
+ */
+function resolvedor(yml) {
+  const atribuicoes = new Map();
+  for (const linha of yml.split("\n").map((l) => l.trim())) {
+    const m = /^([A-Za-z_][A-Za-z0-9_]*)=("?)([^"\s][^"]*)\2$/.exec(linha);
+    if (m && !atribuicoes.has(m[1])) atribuicoes.set(m[1], m[3]);
+  }
+  return (texto) => {
+    let saida = semAspas(texto);
+    for (let i = 0; i < 5; i++) {
+      const antes = saida;
+      saida = saida.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (todo, nome) =>
+        atribuicoes.has(nome) ? semAspas(atribuicoes.get(nome)) : todo);
+      if (saida === antes) break;
+    }
+    return saida;
+  };
+}
+
+/** Acha o comando que produz o .sha256 do APK e devolve diretório, arquivo e saída. */
+function checksumDoApk(yml) {
+  const linha = yml
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => /shasum\s+-a\s+256/.test(l) && /lumen\.apk\.sha256/.test(l));
+  assert.ok(linha, "o APK publicado precisa de um .sha256 gerado no workflow");
+
+  const comCd = /\(\s*cd\s+(\S+)\s*&&\s*shasum\s+-a\s+256\s+(\S+)\s*>\s*(\S+)\s*\)/.exec(linha);
+  const semCd = /shasum\s+-a\s+256\s+(\S+)\s*>\s*(\S+)/.exec(linha);
+  if (comCd) {
+    return { linha, dir: semAspas(comCd[1]), arquivo: semAspas(comCd[2]), saida: semAspas(comCd[3]) };
+  }
+  assert.ok(semCd, `não consegui ler o comando de checksum do APK: ${linha}`);
+  return { linha, dir: null, arquivo: semAspas(semCd[1]), saida: semAspas(semCd[2]) };
+}
+
+function comandoSobre(yml, padrao) {
+  return yml.split("\n").map((l) => l.trim()).filter((l) => padrao.test(l));
+}
+
+test("o checksum do APK é gravado com o nome nu, para o sha256sum -c achar o arquivo", () => {
+  const { linha, dir, arquivo, saida } = checksumDoApk(releaseWorkflow);
+
+  assert.ok(!arquivo.includes("/"),
+    `o shasum recebe "${arquivo}": com diretório no argumento, o .sha256 guarda esse `
+    + `caminho dentro dele e o sha256sum -c falha ao rodar do lado do artefato. `
+    + `Entre no diretório antes (cd) e passe só o nome. Linha: ${linha}`);
+  assert.ok(dir, `o shasum precisa rodar de dentro do diretório do APK. Linha: ${linha}`);
+  assert.equal(saida, `${arquivo}.sha256`,
+    "o .sha256 fica ao lado do artefato e com o nome dele");
+});
+
+test("o preflight valida o MESMO APK que publica", () => {
+  const resolver = resolvedor(releaseWorkflow);
+  const { dir, arquivo } = checksumDoApk(releaseWorkflow);
+  const artefato = resolver(dir ? `${dir}/${arquivo}` : arquivo);
+
+  const badging = comandoSobre(releaseWorkflow, /dump badging/).map(resolver);
+  const assinatura = comandoSobre(releaseWorkflow, /verify --print-certs/).map(resolver);
+
+  assert.ok(badging.some((c) => c.includes(artefato)),
+    `nenhum "dump badging" roda sobre ${artefato}. Conferir versionCode de um APK e `
+    + `publicar outro é o tipo de erro que só aparece depois do release.\n  badging: ${badging.join("\n  badging: ")}`);
+  assert.ok(assinatura.some((c) => c.includes(artefato)),
+    `nenhum "verify --print-certs" roda sobre ${artefato}: o APK publicado sairia sem `
+    + `conferência de assinatura.\n  assinatura: ${assinatura.join("\n  assinatura: ")}`);
+});
+
+test("o APK e o checksum dele são publicados juntos", () => {
+  const { arquivo, saida } = checksumDoApk(releaseWorkflow);
+  for (const nome of [arquivo, saida]) {
+    assert.ok(releaseWorkflow.includes(nome),
+      `${nome} precisa estar entre os artefatos do release`);
+  }
 });

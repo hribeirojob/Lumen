@@ -57,11 +57,30 @@ cd android && ./gradlew assembleRelease
 ```
 
 Sem os quatro valores, o build de release falha claramente. Ele não gera debug
-no lugar do release e não há keystore ou segredo no repositório. O arquivo
-`../public/lumen.apk` é o artefato de produção versionado; a keystore permanece
-fora do repositório. Instalações antigas assinadas com o certificado Debug
-precisam ser desinstaladas uma vez antes de instalar esta linha de produção.
-(Se `./gradlew` não existir, gere com: `gradle wrapper --gradle-version 8.5`.)
+no lugar do release e não há keystore ou segredo no repositório. A keystore
+permanece fora do repositório. Instalações antigas assinadas com o certificado
+Debug precisam ser desinstaladas uma vez antes de instalar esta linha de
+produção. (Se `./gradlew` não existir, gere com: `gradle wrapper --gradle-version 8.5`.)
+
+### O APK não é versionado
+
+O APK de produção **não fica no git**. Ele vive só no GitHub Releases, e nada no
+produto aponta para uma cópia local: a UI (`public/index.html`), o `apkUrl` do
+servidor, a landing e o próprio app Android baixam sempre do Releases.
+
+Depois de assinar localmente, publique o APK no pre-release fixo de staging — é
+de lá que o CI de release lê os bytes, o que mantém **a assinatura no seu Mac**:
+
+```sh
+gh release upload lumen-apk-staging public/lumen.apk --clobber
+```
+
+O `lumen-apk-staging` é marcado como *prerelease*, então nunca resolve como
+`latest` — a URL que a UI usa (`releases/latest/download/lumen.apk`) não serve
+build de staging por acidente. O workflow de release baixa esse asset, roda as
+validações (`aapt dump badging`, `apksigner verify --print-certs`, comparação do
+signer com o release anterior e `sha256`) e só então publica o APK como asset do
+release da versão.
 
 ### A keystore real deste projeto
 

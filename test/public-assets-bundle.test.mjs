@@ -13,7 +13,6 @@ const expectedAssets = [
   "icon-192.png",
   "icon-512.png",
   "index.html",
-  "lumen.apk",
   "manifest.webmanifest",
   "sw.js",
   "version.json",
@@ -40,8 +39,7 @@ test("bundle do servidor Mac copia fontes aninhadas e exclui arquivos fora da al
       "icon-192.png",
       "icon-512.png",
       "index.html",
-      "lumen.apk",
-      "manifest.webmanifest",
+          "manifest.webmanifest",
       "sw.js",
       "version.json",
     ]);

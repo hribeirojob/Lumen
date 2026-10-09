@@ -65,6 +65,23 @@ jobs:
           path: release-source
           persist-credentials: false
 
+      # O APK não vive mais no repositório. Ele é assinado no Mac do mantenedor,
+      # com a keystore que nunca sai de lá, e publicado no pre-release fixo
+      # `lumen-apk-staging`. O CI consome esses bytes — a assinatura segue local.
+      # O staging é prerelease, então nunca resolve como `latest`: a URL que a UI
+      # usa (releases/latest/download/lumen.apk) não serve build de staging.
+      - name: Fetch the signed Android package from the staging pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/lumen-apk"
+          gh release download lumen-apk-staging \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern lumen.apk \
+            --dir "${RUNNER_TEMP}/lumen-apk" \
+            --clobber
+          test -s "${RUNNER_TEMP}/lumen-apk/lumen.apk"
+
       - name: Validate the version-matched signed Android package
         working-directory: release-source
         env:
@@ -77,7 +94,9 @@ jobs:
           android_version_code="$(sed -nE 's/.*versionCode = ([0-9]+).*/\1/p' android/app/build.gradle | head -n 1)"
           metadata_tag="$(jq -r '.tag' public/version.json)"
           metadata_apk_version="$(jq -r '.apkVersion' public/version.json)"
-          test -s public/lumen.apk
+          # Bytes vindos do staging, não do checkout: o repositório não versiona mais o APK.
+          apk_path="${RUNNER_TEMP}/lumen-apk/lumen.apk"
+          test -s "${apk_path}"
 
           # An application ID change is allowed only when it is declared, in the repository,
           # for this exact tag. The next release sees a different tag and the guard is armed again.
@@ -141,11 +160,11 @@ jobs:
             exit 1
           fi
 
-          apk_badging="$("${aapt}" dump badging public/lumen.apk)"
+          apk_badging="$("${aapt}" dump badging "${apk_path}")"
           apk_package="$(printf '%s\n' "${apk_badging}" | sed -nE "s/^package: name='([^']+)'.*/\1/p")"
           apk_version_code="$(printf '%s\n' "${apk_badging}" | sed -nE "s/^package:.*versionCode='([0-9]+)'.*/\1/p")"
           apk_version="$(printf '%s\n' "${apk_badging}" | sed -nE "s/^package:.*versionName='([^']+)'.*/\1/p")"
-          apk_signer_output="$("${apksigner}" verify --print-certs public/lumen.apk)"
+          apk_signer_output="$("${apksigner}" verify --print-certs "${apk_path}")"
           apk_signers="$(printf '%s\n' "${apk_signer_output}" | sed -nE 's/^[[:print:]]*Signer[^:]*:?[[:space:]]+certificate SHA-256 digest: ([[:xdigit:]]+).*$/\1/p' | tr '[:upper:]' '[:lower:]' | sort -u)"
 
           previous_apk_package=""
@@ -236,15 +255,15 @@ jobs:
             exit 1
           fi
 
-          (cd public && shasum -a 256 lumen.apk > lumen.apk.sha256)
+          (cd "${RUNNER_TEMP}/lumen-apk" && shasum -a 256 lumen.apk > lumen.apk.sha256)
 
       - name: Upload the validated Android package
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: Lumen-Android-production
           path: |
-            release-source/public/lumen.apk
-            release-source/public/lumen.apk.sha256
+            ${{ runner.temp }}/lumen-apk/lumen.apk
+            ${{ runner.temp }}/lumen-apk/lumen.apk.sha256
           if-no-files-found: error
           retention-days: 30
 
@@ -390,7 +409,11 @@ jobs:
     runs-on: ubuntu-latest
     concurrency:
       group: lumen-release-publisher
-      queue: max
+      # `queue: max` não existe: as únicas chaves de concurrency são `group` e
+      # `cancel-in-progress`. O Actions não tem fila configurável — enfileirar já
+      # é o padrão. A intenção era não cancelar uma publicação em andamento, que
+      # se escreve assim, igual ao bloco de workflow lá em cima.
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:

@@ -4,6 +4,12 @@ node_modules/
 .DS_Store
 build/
 *.apk.bak
+
+# O APK de producao nao e versionado: ele e assinado no Mac do mantenedor e vive
+# so no GitHub Releases (ver android/README.md). Nada no produto aponta para a
+# copia local — a UI, o server, a landing e o app Android baixam do Releases.
+public/lumen.apk
+public/lumen.apk.sha256
 index.html.bak
 .gradle/
 android/.gradle/

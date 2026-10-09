@@ -23,7 +23,6 @@ const expectedPublicFiles = [
   'icon-192.png',
   'icon-512.png',
   'index.html',
-  'lumen.apk',
   'manifest.webmanifest',
   'sw.js',
   'version.json'

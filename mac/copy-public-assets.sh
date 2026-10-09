@@ -8,6 +8,10 @@ fi
 
 SOURCE_DIR="$1"
 DEST_DIR="$2"
+# O APK NÃO entra aqui de propósito. Ele não é mais versionado e nada no produto
+# aponta para a cópia local: a UI (public/index.html), o server (apkUrl), a landing
+# e o próprio app Android baixam sempre do GitHub Releases. Embutir 1,9 MB em todo
+# bundle servia só a uma rota que ninguém navega.
 PUBLIC_FILES=(
   "index.html"
   "manifest.webmanifest"
@@ -16,7 +20,6 @@ PUBLIC_FILES=(
   "icon-192-dark.png"
   "icon-512.png"
   "version.json"
-  "lumen.apk"
   "fonts/Inter-Regular.otf"
   "fonts/Inter-SemiBold.otf"
 )
