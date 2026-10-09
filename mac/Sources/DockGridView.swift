@@ -1,0 +1,438 @@
+import SwiftUI
+
+struct DockGridView: View {
+  @EnvironmentObject private var store: DockStore
+  @EnvironmentObject private var languageStore: LanguageStore
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @State private var showPicker = false
+  @State private var draggedItem: String?
+  @State private var currentPage: Int? = 0
+  @State private var draftPositions: [String: Int]?
+  @State private var isReordering = false
+  @State private var pickerInsertIndex: Int?
+
+  private let pageSize = 8
+  private let maxPageCount = 5
+  private let tileSize: CGFloat = 80
+  private let tileSpacing: CGFloat = 22
+  private let pageHeight: CGFloat = 288
+  private let carouselGap: CGFloat = 24
+  private let carouselVerticalOffset: CGFloat = 22
+  private let carouselPeekRatio: CGFloat = 0.55
+  private let carouselMaxPageWidth: CGFloat = 458
+  private let carouselMinPageWidth: CGFloat = 450
+
+  private enum TileItem: Hashable, Identifiable {
+    case piece(DockPiece)
+    case add(Int)
+
+    var id: String {
+      switch self {
+      case .piece(let piece): return piece.id
+      case .add(let index): return "add:\(index)"
+      }
+    }
+  }
+
+  private var displayedPieces: [DockPiece] {
+    guard let draftPositions else { return store.pieces }
+    return store.pieces.compactMap { piece in
+      guard let position = draftPositions[piece.id] else { return nil }
+      return piece.atPosition(position)
+    }.sorted { $0.position < $1.position }
+  }
+
+  private var slotCount: Int {
+    pageSize * maxPageCount
+  }
+
+  private var pages: [[TileItem]] {
+    let pageCount = max(1, (slotCount + pageSize - 1) / pageSize)
+    let byPosition = Dictionary(displayedPieces.map { ($0.position, $0) }, uniquingKeysWith: { first, _ in first })
+
+    return (0..<pageCount).map { page in
+      let start = page * pageSize
+      return (0..<pageSize).map { offset in
+        let index = start + offset
+        guard let piece = byPosition[index] else { return .add(index) }
+        return .piece(piece)
+      }
+    }
+  }
+
+  private var pageCount: Int {
+    max(1, pages.count)
+  }
+
+  private var currentPageIndex: Int {
+    min(max(currentPage ?? 0, 0), pageCount - 1)
+  }
+
+  var body: some View {
+    VStack(spacing: 0) {
+      if !store.online {
+        offlineView
+      } else {
+        dockPages
+      }
+    }
+    .padding(.leading, 20)
+    .padding(.top, 8)
+    .padding(.bottom, 18)
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(LumenTheme.page.ignoresSafeArea())
+    .overlay(alignment: .bottom) {
+      if store.online {
+        HStack(spacing: 0) {
+          if isReordering {
+            HStack(spacing: 6) {
+              Image(systemName: "arrow.up.left.and.arrow.down.right")
+                .font(.system(size: 11, weight: .medium))
+              Text(I18n.text("grid.drag", language: languageStore.selected))
+                .font(.system(size: 12))
+            }
+            .foregroundStyle(.white.opacity(0.85))
+            .padding(.leading, 24)
+            Spacer()
+          } else {
+            Spacer()
+          }
+          reorderButton
+            .padding(.trailing, isReordering ? 24 : 12)
+            .padding(.bottom, isReordering ? 12 : 8)
+        }
+        .frame(maxWidth: .infinity)
+      }
+    }
+    .overlay(alignment: .bottom) {
+      if let error = store.pieceActionError {
+        Text(error)
+          .font(.system(size: 12, weight: .semibold))
+          .multilineTextAlignment(.center)
+          .fixedSize(horizontal: false, vertical: true)
+          .frame(maxWidth: 380)
+          .foregroundStyle(.primary)
+          .padding(.horizontal, 14)
+          .padding(.vertical, 10)
+          .background(.ultraThinMaterial, in: Capsule())
+          .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 1))
+          .padding(.horizontal, 16)
+          .padding(.bottom, 48)
+          .accessibilityIdentifier("pieceActionError")
+          .transition(.move(edge: .bottom).combined(with: .opacity))
+      }
+    }
+    .animation(.easeOut(duration: 0.2), value: store.pieceActionError)
+    .task(id: store.pieceActionErrorRevision) {
+      guard store.pieceActionError != nil else { return }
+      do { try await Task.sleep(nanoseconds: 3_000_000_000) }
+      catch { return }
+      store.clearPieceActionError()
+    }
+    .onChange(of: store.pieceActionErrorRevision) { _, _ in
+      guard let error = store.pieceActionError else { return }
+      AccessibilityNotification.Announcement(error).post()
+    }
+    .onChange(of: displayedPieces.count) { _, _ in
+      currentPage = min(currentPageIndex, pageCount - 1)
+    }
+    .onChange(of: isReordering) { _, active in
+      guard !active else { return }
+      draggedItem = nil
+      draftPositions = nil
+    }
+    .sheet(isPresented: $showPicker, onDismiss: { pickerInsertIndex = nil }) {
+      AppPickerSheet(insertAt: pickerInsertIndex)
+    }
+  }
+
+  private var dockPages: some View {
+    GeometryReader { geo in
+      let cardHeight = pageHeight
+      let pageWidth = carouselPageWidth(for: geo.size.width)
+      let trailingFadeStart = max(0, 1 - 16 / max(geo.size.width, 1))
+
+      VStack(spacing: 18) {
+        ScrollView(.horizontal) {
+          LazyHStack(alignment: .center, spacing: carouselGap) {
+            ForEach(Array(pages.enumerated()), id: \.offset) { index, items in
+              pageContent(items: items)
+                .frame(width: pageWidth, height: cardHeight)
+                .id(index)
+            }
+          }
+          .scrollTargetLayout()
+          .padding(.leading, 12)
+        }
+        .scrollTargetBehavior(.viewAligned)
+        .scrollPosition(id: $currentPage, anchor: .leading)
+        .scrollIndicators(.hidden)
+        .frame(height: cardHeight)
+        .mask(
+          LinearGradient(
+            stops: [
+              .init(color: .black, location: 0),
+              .init(color: .black, location: trailingFadeStart),
+              .init(color: .clear, location: 1),
+            ],
+            startPoint: .leading,
+            endPoint: .trailing
+          )
+        )
+
+        pageDots(count: pageCount)
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+      .offset(y: carouselVerticalOffset)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+
+  private func carouselPageWidth(for availableWidth: CGFloat) -> CGFloat {
+    let dominant = (availableWidth - carouselGap) / (1 + carouselPeekRatio)
+    return min(carouselMaxPageWidth, max(carouselMinPageWidth, dominant))
+  }
+
+  private func pageDots(count: Int) -> some View {
+    HStack(spacing: 7) {
+      ForEach(0..<count, id: \.self) { index in
+        Button {
+          selectPage(index)
+        } label: {
+          Circle()
+            .fill(index == currentPageIndex ? Color.white.opacity(0.92) : Color.white.opacity(0.22))
+            .frame(width: 7, height: 7)
+        }
+        .buttonStyle(.plain)
+        .help(I18n.text("grid.page", language: languageStore.selected, ["page": "\(index + 1)"]))
+        .accessibilityLabel(I18n.text("grid.page", language: languageStore.selected, ["page": "\(index + 1)"]))
+      }
+    }
+    .frame(maxWidth: .infinity)
+  }
+
+  private func selectPage(_ index: Int) {
+    let nextPage = min(max(index, 0), pageCount - 1)
+    withAnimation(.easeOut(duration: 0.25)) {
+      currentPage = nextPage
+    }
+  }
+
+  @ViewBuilder
+  private func pageContent(items: [TileItem]) -> some View {
+    appGrid(items: items)
+      .padding(.horizontal, 32)
+      .padding(.vertical, 29)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .background {
+        if #available(macOS 26, *) {
+          RoundedRectangle(cornerRadius: 40, style: .continuous)
+            .fill(LumenTheme.surface)
+            .glassEffect(.regular, in: .rect(cornerRadius: 40))
+        } else {
+          RoundedRectangle(cornerRadius: 40, style: .continuous)
+            .fill(LumenTheme.surface)
+        }
+      }
+  }
+
+  private func appGrid(items: [TileItem]) -> some View {
+    let columns = Array(repeating: GridItem(.flexible(minimum: tileSize), spacing: tileSpacing), count: 4)
+    return Group {
+      if #available(macOS 26, *) {
+        GlassEffectContainer(spacing: tileSpacing) {
+          LazyVGrid(columns: columns, alignment: .center, spacing: tileSpacing) {
+            ForEach(items) { item in
+              switch item {
+              case .piece(let piece):
+                pieceTile(piece: piece)
+              case .add(let index):
+                addButtonModule(at: index)
+              }
+            }
+          }
+        }
+      } else {
+        LazyVGrid(columns: columns, alignment: .center, spacing: tileSpacing) {
+          ForEach(items) { item in
+            switch item {
+            case .piece(let piece):
+              pieceTile(piece: piece)
+            case .add(let index):
+              addButtonModule(at: index)
+            }
+          }
+        }
+      }
+    }
+    .frame(maxWidth: .infinity)
+  }
+
+  private func startDrag(_ id: String) {
+    guard isReordering else { return }
+    draggedItem = id
+    draftPositions = nil
+  }
+
+  @ViewBuilder
+  private func pieceTile(piece: DockPiece) -> some View {
+    if piece.type == .app {
+      appTile(name: piece.name ?? piece.displayTitle, id: piece.id, position: piece.position)
+    } else if isReordering {
+      DockIcon(piece: piece, allowsRemoval: false, isReordering: true)
+        .onDrag {
+          startDrag(piece.id)
+          return NSItemProvider(object: piece.id as NSString)
+        }
+        .onDrop(of: [.text], delegate: DropDelegate(position: piece.position, store: store, reduceMotion: reduceMotion, draggedItem: $draggedItem, draftPositions: $draftPositions))
+    } else {
+      DockIcon(piece: piece, allowsRemoval: true, isReordering: false)
+    }
+  }
+
+  @ViewBuilder
+  private func appTile(name: String, id: String, position: Int) -> some View {
+    if isReordering {
+      DockIcon(name: name, allowsRemoval: false, isReordering: true)
+        .onDrag {
+          startDrag(id)
+          return NSItemProvider(object: id as NSString)
+        }
+        .onDrop(of: [.text], delegate: DropDelegate(position: position, store: store, reduceMotion: reduceMotion, draggedItem: $draggedItem, draftPositions: $draftPositions))
+    } else {
+      DockIcon(name: name, allowsRemoval: true, isReordering: false)
+    }
+  }
+
+  private var reorderButton: some View {
+    Button {
+      withAnimation(.easeOut(duration: 0.2)) {
+        isReordering.toggle()
+      }
+    } label: {
+        Text(I18n.text(isReordering ? "grid.reorder.done" : "grid.reorder", language: languageStore.selected))
+        .font(.system(size: 13, weight: .semibold))
+        .foregroundStyle(isReordering ? Color.white : Color.white.opacity(0.9))
+        .padding(.horizontal, 20)
+        .padding(.vertical, 11)
+        .background(isReordering ? LumenTheme.selection : Color.white.opacity(0.14))
+        .clipShape(Capsule())
+    }
+    .buttonStyle(.plain)
+    .help(I18n.text(isReordering ? "grid.reorderHelp" : "grid.reorder", language: languageStore.selected))
+  }
+
+  @ViewBuilder
+  private func addButtonModule(at index: Int) -> some View {
+    let addSlot = AddSlotButton(index: index, size: tileSize) {
+      pickerInsertIndex = index
+      showPicker = true
+    }
+    if isReordering {
+      addSlot
+        .onDrop(of: [.text], delegate: DropDelegate(position: index, store: store, reduceMotion: reduceMotion, draggedItem: $draggedItem, draftPositions: $draftPositions))
+        .help(I18n.text("grid.move", language: languageStore.selected, ["position": "\(index + 1)"]))
+    } else {
+      addSlot
+        .disabled(store.isPinnedLimitReached)
+        .help(store.isPinnedLimitReached ? I18n.text("grid.limit", language: languageStore.selected) : I18n.text("grid.addHere", language: languageStore.selected))
+    }
+  }
+
+  private var offlineView: some View {
+    ContentUnavailableView(
+      I18n.text("grid.offline", language: languageStore.selected),
+      systemImage: "wifi.slash",
+      description: Text(I18n.text("grid.offlineDescription", language: languageStore.selected))
+    )
+    .foregroundStyle(.white.opacity(0.85))
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+}
+
+private struct AddSlotButton: View {
+  @EnvironmentObject private var languageStore: LanguageStore
+  let index: Int
+  let size: CGFloat
+  let action: () -> Void
+  @State private var isHovered = false
+
+  var body: some View {
+    Button(action: action) {
+      VStack(spacing: 8) {
+        ZStack {
+          RoundedRectangle(cornerRadius: 28, style: .continuous)
+            .fill(Color.white.opacity(isHovered ? 0.12 : 0.05))
+            .overlay(
+              RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .strokeBorder(Color.white.opacity(isHovered ? 0.18 : 0.08), lineWidth: 1)
+            )
+            .frame(width: size, height: size)
+
+          Image(systemName: "plus")
+            .font(.system(size: 18, weight: .semibold))
+            .foregroundStyle(.white.opacity(isHovered ? 0.94 : 0.72))
+        }
+
+        Text(I18n.text("picker.add", language: languageStore.selected))
+          .font(.system(size: 11, weight: .medium))
+          .foregroundStyle(.white.opacity(0.78))
+          .frame(height: 13)
+      }
+      .frame(width: size, height: size + 24)
+    }
+    .buttonStyle(.plain)
+    .onHover { isHovered = $0 }
+    .help(I18n.text("grid.add", language: languageStore.selected, ["position": "\(index + 1)"]))
+    .accessibilityLabel(I18n.text("grid.add", language: languageStore.selected, ["position": "\(index + 1)"]))
+  }
+}
+
+struct DropDelegate: SwiftUI.DropDelegate {
+  let position: Int
+  let store: DockStore
+  let reduceMotion: Bool
+  @Binding var draggedItem: String?
+  @Binding var draftPositions: [String: Int]?
+
+  func performDrop(info: DropInfo) -> Bool {
+    guard let positions = draftPositions else { return false }
+    draggedItem = nil
+    Task { @MainActor in
+      let didSave = await store.reorderPieces(positions)
+      guard draftPositions == positions else { return }
+      if didSave {
+        draftPositions = nil
+      } else {
+        withAnimation(reduceMotion ? nil : .smooth(duration: 0.2)) {
+          draftPositions = nil
+        }
+      }
+    }
+    return true
+  }
+
+  func dropEntered(info: DropInfo) {
+    guard let dragged = draggedItem,
+          let sourcePosition = (draftPositions ?? Dictionary(uniqueKeysWithValues: store.pieces.map { ($0.id, $0.position) }))[dragged],
+          sourcePosition != position else { return }
+
+    var next = draftPositions ?? Dictionary(uniqueKeysWithValues: store.pieces.map { ($0.id, $0.position) })
+    withAnimation(reduceMotion ? nil : .snappy(duration: 0.24, extraBounce: 0.02)) {
+      moveDragged(to: position, dragged: dragged, in: &next)
+      draftPositions = next
+    }
+  }
+
+  private func moveDragged(to targetPosition: Int, dragged: String, in positions: inout [String: Int]) {
+    guard let sourcePosition = positions[dragged] else { return }
+    if let displacedID = positions.first(where: { $0.key != dragged && $0.value == targetPosition })?.key {
+      positions[displacedID] = sourcePosition
+    }
+    positions[dragged] = targetPosition
+  }
+
+  func dropUpdated(info: DropInfo) -> DropProposal? {
+    DropProposal(operation: .move)
+  }
+}

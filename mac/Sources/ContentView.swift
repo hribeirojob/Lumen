@@ -1,0 +1,759 @@
+import SwiftUI
+import AppKit
+import CoreImage
+import CoreImage.CIFilterBuiltins
+
+enum SidebarItem: String, CaseIterable, Identifiable {
+  case apps = "Slots"
+  case about = "Conectar"
+
+  var id: String { rawValue }
+
+  var icon: String {
+    switch self {
+    case .apps: return "square.grid.2x2.fill"
+    case .about: return "info.circle"
+    }
+  }
+}
+
+struct ContentView: View {
+  @EnvironmentObject private var store: DockStore
+  @EnvironmentObject private var updater: LumenUpdateManager
+  @EnvironmentObject private var languageStore: LanguageStore
+  @State private var selection: SidebarItem? = .apps
+  @State private var isSidebarVisible = true
+  @State private var hoveredSidebarItem: SidebarItem?
+  @State private var trafficLightsClearance: CGFloat = 80
+  @State private var trafficLightsMidY: CGFloat = 16
+  private let headerHeight: CGFloat = 32
+  private let sidebarChromeRadius: CGFloat = 20
+
+  var body: some View {
+    ZStack(alignment: .topLeading) {
+      HStack(spacing: 0) {
+        sidebar
+          .frame(width: isSidebarVisible ? 208 : 0)
+          .clipped()
+          .opacity(isSidebarVisible ? 1 : 0)
+        detail
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .ignoresSafeArea(.container, edges: .top)
+    }
+    .overlay(alignment: .topLeading) {
+      header
+    }
+    .background(LumenTheme.page.ignoresSafeArea())
+    .background(TrafficLightsClearanceReader(inset: $trafficLightsClearance, midY: $trafficLightsMidY, isSidebarVisible: $isSidebarVisible))
+    .ignoresSafeArea(.container, edges: .top)
+    .preferredColorScheme(.dark)
+    .animation(.easeOut(duration: 0.2), value: isSidebarVisible)
+    .task {
+      try? await Task.sleep(nanoseconds: 300_000_000)
+      guard !Task.isCancelled else { return }
+      await updater.check()
+    }
+  }
+
+  private var header: some View {
+    HStack(spacing: 0) {
+      Color.clear
+        .frame(width: isSidebarVisible ? 208 : trafficLightsClearance)
+        .allowsHitTesting(false)
+
+      if !isSidebarVisible {
+        sidebarToggleButton
+      }
+
+      Text("Lumen")
+        .font(.headline.weight(.semibold))
+        .foregroundStyle(.white)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, 6)
+        .allowsHitTesting(false)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .frame(height: headerHeight)
+    .offset(y: trafficLightsMidY - headerHeight / 2)
+  }
+
+  private var sidebarToggleButton: some View {
+    Button {
+      withAnimation(.easeOut(duration: 0.2)) {
+        isSidebarVisible.toggle()
+      }
+    } label: {
+      Image(systemName: "sidebar.left")
+        .font(.system(size: 17, weight: .medium))
+        .foregroundStyle(.white.opacity(0.9))
+        .frame(width: 26, height: 26)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel(I18n.text(isSidebarVisible ? "sidebar.hide" : "sidebar.show", language: languageStore.selected))
+  }
+
+  private var customTrafficLights: some View {
+    HStack(spacing: 8) {
+      Circle()
+        .fill(Color(red: 0.96, green: 0.23, blue: 0.21))
+        .frame(width: 12, height: 12)
+        .overlay(Circle().stroke(Color.black.opacity(0.15), lineWidth: 0.6))
+        .onTapGesture { NSApp.keyWindow?.performClose(nil) }
+      Circle()
+        .fill(Color(red: 0.97, green: 0.73, blue: 0.11))
+        .frame(width: 12, height: 12)
+        .overlay(Circle().stroke(Color.black.opacity(0.15), lineWidth: 0.6))
+        .onTapGesture { NSApp.keyWindow?.miniaturize(nil) }
+      Circle()
+        .fill(Color(red: 0.17, green: 0.77, blue: 0.28))
+        .frame(width: 12, height: 12)
+        .overlay(Circle().stroke(Color.black.opacity(0.15), lineWidth: 0.6))
+        .onTapGesture { NSApp.keyWindow?.zoom(nil) }
+    }
+    .frame(width: 52, height: 12)
+  }
+
+  private var sidebar: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      HStack(spacing: 0) {
+        Color.clear
+          .frame(width: trafficLightsClearance)
+          .allowsHitTesting(false)
+        Spacer()
+        sidebarToggleButton
+          .padding(.trailing, 8)
+      }
+      .frame(height: headerHeight)
+      .offset(y: trafficLightsMidY - headerHeight / 2 - 16)
+      .padding(.top, 8)
+
+      ForEach(SidebarItem.allCases, id: \.self) { item in
+        Button {
+          selection = item
+        } label: {
+          HStack(spacing: 6) {
+            Image(systemName: item.icon)
+              .font(.system(size: 12, weight: .medium))
+              .frame(width: 14, height: 14)
+            Text(sidebarLabel(for: item))
+              .font(.system(size: 13, weight: .medium))
+            Spacer(minLength: 0)
+          }
+          .padding(.horizontal, 10)
+          .frame(height: 28)
+          .background(sidebarRowBackground(item))
+          .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+          .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(selection == item ? Color.white : Color.white.opacity(0.58))
+        .padding(.leading, 16)
+        .padding(.trailing, 16)
+        .onHover { hovering in
+          if hovering {
+            hoveredSidebarItem = item
+          } else if hoveredSidebarItem == item {
+            hoveredSidebarItem = nil
+          }
+        }
+        .accessibilityLabel(sidebarLabel(for: item))
+        .accessibilityValue(selection == item ? I18n.text("sidebar.selected", language: languageStore.selected) : "")
+      }
+      Spacer()
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .background {
+      // Base do vidro: o fundo da janela agora e `page`, entao uma base em
+      // `page` seria invisivel. `elevated` LEVANTA o cartao do chao (distancia
+      // RGB somada 37 contra 10 de surface) e da ao Liquid Glass o que
+      // refratar, sem passar do teto translucido de 0.25 do contrato.
+      if #available(macOS 26, *) {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+          .fill(LumenTheme.elevated.opacity(0.25))
+          .glassEffect(.regular, in: .rect(cornerRadius: 18))
+      } else {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+          .fill(LumenTheme.elevated.opacity(0.25))
+      }
+    }
+    .overlay(
+      RoundedRectangle(cornerRadius: 18, style: .continuous)
+        .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
+    )
+    .padding(.leading, 8)
+    .padding(.top, 8)
+    .padding(.bottom, 8)
+    .padding(.trailing, 8)
+  }
+
+  private func sidebarRowBackground(_ item: SidebarItem) -> Color {
+    if selection == item { return LumenTheme.selection }
+    if hoveredSidebarItem == item { return Color.white.opacity(0.08) }
+    return .clear
+  }
+
+  private func sidebarLabel(for item: SidebarItem) -> String {
+    switch item {
+    case .apps: return I18n.text("sidebar.slots", language: languageStore.selected)
+    case .about: return I18n.text("sidebar.connect", language: languageStore.selected)
+    }
+  }
+
+  @ViewBuilder
+  private var detail: some View {
+    switch selection {
+    case .apps:
+      DockGridView()
+    case .about:
+      AboutView()
+    case .none:
+      DockGridView()
+    }
+  }
+}
+
+private struct TrafficLightsClearanceReader: NSViewRepresentable {
+  @Binding var inset: CGFloat
+  @Binding var midY: CGFloat
+  @Binding var isSidebarVisible: Bool
+
+  func makeNSView(context: Context) -> ReaderView {
+    let view = ReaderView()
+    view.onChange = { nextInset, nextMidY in
+      DispatchQueue.main.async {
+        if abs(inset - nextInset) > 0.5 {
+          inset = nextInset
+        }
+        if abs(midY - nextMidY) > 0.5 {
+          midY = nextMidY
+        }
+      }
+    }
+    view.isSidebarVisible = isSidebarVisible
+    return view
+  }
+
+  func updateNSView(_ nsView: ReaderView, context: Context) {
+    nsView.onChange = { nextInset, nextMidY in
+      DispatchQueue.main.async {
+        if abs(inset - nextInset) > 0.5 {
+          inset = nextInset
+        }
+        if abs(midY - nextMidY) > 0.5 {
+          midY = nextMidY
+        }
+      }
+    }
+    nsView.isSidebarVisible = isSidebarVisible
+    nsView.publish()
+  }
+
+  final class ReaderView: NSView {
+    var onChange: ((CGFloat, CGFloat) -> Void)?
+    var isSidebarVisible: Bool = true
+    private var resizeObserver: NSObjectProtocol?
+    private var originalTrafficLightFrames: [NSWindow.ButtonType: NSRect] = [:]
+
+    override func viewDidMoveToWindow() {
+      super.viewDidMoveToWindow()
+      if let resizeObserver {
+        NotificationCenter.default.removeObserver(resizeObserver)
+        self.resizeObserver = nil
+      }
+      publish()
+      if let window {
+        resizeObserver = NotificationCenter.default.addObserver(
+          forName: NSWindow.didResizeNotification,
+          object: window,
+          queue: .main
+        ) { [weak self] _ in
+          self?.publish()
+        }
+      }
+      DispatchQueue.main.async { [weak self] in
+        self?.publish()
+      }
+    }
+
+    override func layout() {
+      super.layout()
+      publish()
+    }
+
+    deinit {
+      if let resizeObserver {
+        NotificationCenter.default.removeObserver(resizeObserver)
+      }
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func publish() {
+      guard let window,
+            let zoom = window.standardWindowButton(.zoomButton),
+            let close = window.standardWindowButton(.closeButton),
+            let contentView = window.contentView
+      else { return }
+
+      let dx: CGFloat = 12
+      let dy: CGFloat = -10
+      for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] as [NSWindow.ButtonType] {
+        guard let btn = window.standardWindowButton(type) else { continue }
+        if originalTrafficLightFrames[type] == nil {
+          originalTrafficLightFrames[type] = btn.frame
+        }
+        if let original = originalTrafficLightFrames[type] {
+          var frame = original
+          frame.origin.x = original.origin.x + dx
+          frame.origin.y = original.origin.y + dy
+          if btn.frame != frame { btn.frame = frame }
+        }
+      }
+
+      let zoomRect = zoom.convert(zoom.bounds, to: contentView)
+      let inset = ceil(zoomRect.maxX + 10)
+      guard inset > 40 else { return }
+
+      let closeRect = close.convert(close.bounds, to: contentView)
+      let midY = contentView.isFlipped ? closeRect.midY : (contentView.bounds.height - closeRect.midY)
+      guard midY > 4, midY < 80 else { return }
+
+      onChange?(inset, midY)
+    }
+  }
+}
+
+struct AboutView: View {
+  @EnvironmentObject private var store: DockStore
+  @EnvironmentObject private var server: ServerManager
+  @EnvironmentObject private var updater: LumenUpdateManager
+  @EnvironmentObject private var languageStore: LanguageStore
+  @State private var showingReleaseNotes = false
+  @State private var showingResetPinConfirmation = false
+  private let aboutContentMaxWidth: CGFloat = 980
+
+  var body: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 20) {
+        HStack {
+          Text(I18n.text("aria.language", language: languageStore.selected))
+            .font(.subheadline.weight(.semibold))
+          Spacer()
+          Picker("", selection: Binding(
+            get: { languageStore.selected },
+            set: { languageStore.select($0) }
+          )) {
+            ForEach(LumenLanguage.allCases) { language in
+              Text(language.displayName).tag(language)
+            }
+          }
+          .labelsHidden()
+          .pickerStyle(.menu)
+          .fixedSize()
+          .accessibilityLabel(I18n.text("aria.language", language: languageStore.selected))
+        }
+
+        VStack(alignment: .leading, spacing: 4) {
+          Text(I18n.text("connect.title", language: languageStore.selected))
+            .font(.title.bold())
+          Text(I18n.text("connect.description", language: languageStore.selected))
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+        }
+
+        VStack(spacing: 16) {
+          Text(I18n.text("connect.accessCode", language: languageStore.selected))
+            .font(.headline)
+          AccessCodeView(code: store.pinCode) {
+            showingResetPinConfirmation = true
+          }
+          if let err = store.pinError {
+            Text(err)
+              .font(.caption)
+              .foregroundStyle(.red)
+          }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(16)
+        .background(
+          RoundedRectangle(cornerRadius: 16)
+            .fill(.quaternary)
+        )
+
+        VStack(alignment: .leading, spacing: 16) {
+          Text(I18n.text("connect.openOther", language: languageStore.selected))
+            .font(.headline)
+          if let ip = ServerManager.lanIPv4() {
+            let localURL = "http://\(ip):3000"
+            HStack(alignment: .center, spacing: 16) {
+              QRCodeView(value: localURL)
+                .frame(width: 112, height: 112)
+
+              VStack(alignment: .leading, spacing: 10) {
+                Text(I18n.text("connect.scan", language: languageStore.selected))
+                  .font(.caption.weight(.semibold))
+                Text(localURL)
+                  .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                  .textSelection(.enabled)
+                  .lineLimit(1)
+                  .minimumScaleFactor(0.7)
+                HStack(spacing: 8) {
+                  Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(localURL, forType: .string)
+                  } label: {
+                    Label(I18n.text("connect.copyURL", language: languageStore.selected), systemImage: "doc.on.doc")
+                  }
+                  .buttonStyle(.bordered)
+                  Button {
+                    if let url = URL(string: localURL) {
+                      NSWorkspace.shared.open(url)
+                    }
+                  } label: {
+                    Label(I18n.text("connect.open", language: languageStore.selected), systemImage: "arrow.up.right.square")
+                  }
+                  .buttonStyle(.bordered)
+                }
+              }
+            }
+            Text(I18n.text("connect.network", language: languageStore.selected))
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          } else {
+            Text(I18n.text("connect.noIP", language: languageStore.selected))
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(
+          RoundedRectangle(cornerRadius: 16)
+            .fill(.quaternary)
+        )
+
+        HStack(spacing: 16) {
+          HStack(spacing: 8) {
+            Circle()
+              .fill(store.online ? Color.green : Color.red.opacity(0.85))
+              .frame(width: 9, height: 9)
+            Text(I18n.text(store.online ? "connect.online" : "connect.offline", language: languageStore.selected))
+              .font(.subheadline.weight(.semibold))
+          }
+          Text(I18n.text("connect.devices", language: languageStore.selected, ["count": "\(store.devices)"]))
+          Text(I18n.text("connect.pinned", language: languageStore.selected, ["count": "\(store.pinned.count)"]))
+          Spacer()
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+
+        if let err = server.lastError ?? store.lastError {
+          Text(err)
+            .font(.caption)
+            .foregroundStyle(.red)
+        }
+
+        VStack(alignment: .leading, spacing: 8) {
+          HStack {
+            Text(I18n.text("updates.title", language: languageStore.selected))
+              .font(.subheadline.weight(.semibold))
+            Spacer()
+            if updater.state == .checking {
+              ProgressView().controlSize(.small)
+            }
+          }
+          if let release = updater.release {
+            HStack(spacing: 8) {
+              Label(I18n.text("updates.new", language: languageStore.selected, ["version": release.tag]), systemImage: "arrow.down.circle.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.orange)
+              Spacer()
+              Button(I18n.text("updates.changes", language: languageStore.selected)) {
+                showingReleaseNotes = true
+              }
+              .buttonStyle(.bordered)
+              .controlSize(.small)
+              Button(I18n.text("updates.install", language: languageStore.selected)) {
+                Task { await updater.downloadAndInstall() }
+              }
+              .buttonStyle(.borderedProminent)
+              .controlSize(.small)
+              .disabled(updater.isBusy)
+            }
+          } else {
+            HStack {
+              Text(I18n.text("updates.installed", language: languageStore.selected, ["version": updater.currentVersion]))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+              Spacer()
+              Button(I18n.text("updates.check", language: languageStore.selected)) {
+                Task { await updater.check() }
+              }
+              .buttonStyle(.bordered)
+              .controlSize(.small)
+              .disabled(updater.isBusy)
+            }
+          }
+          if let message = updater.statusMessage(language: languageStore.selected) {
+            if updater.release == nil {
+              Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            } else {
+              Text(message)
+                .font(.caption)
+                .foregroundStyle(.orange)
+            }
+          }
+        }
+        .padding(.top, 4)
+      }
+      .padding(28)
+      .frame(maxWidth: aboutContentMaxWidth, alignment: .leading)
+      .frame(maxWidth: .infinity, alignment: .center)
+    }
+    .padding(.top, 40)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .background(LumenTheme.page.ignoresSafeArea())
+    .task {
+      // A aba pode ser aberta depois do refresh inicial do store.
+      await store.loadPin()
+    }
+    .confirmationDialog(I18n.text("confirm.newCode", language: languageStore.selected), isPresented: $showingResetPinConfirmation, titleVisibility: .visible) {
+      Button(I18n.text("confirm.newCodeAction", language: languageStore.selected), role: .destructive) {
+        Task { await store.resetPin() }
+      }
+      Button(I18n.text("confirm.cancel", language: languageStore.selected), role: .cancel) {}
+    } message: {
+      Text(I18n.text("confirm.newCodeMessage", language: languageStore.selected))
+    }
+    .sheet(isPresented: $showingReleaseNotes) {
+      if let release = updater.release {
+        ReleaseNotesView(release: release)
+      }
+    }
+  }
+}
+
+private struct AccessCodeView: View {
+  @EnvironmentObject private var languageStore: LanguageStore
+  @State private var isRegenerateHovered = false
+  let code: String?
+  let onRegenerate: () -> Void
+
+  private var digits: [String] {
+    let characters = Array((code ?? "").prefix(4))
+    return (0..<4).map { index in
+      index < characters.count ? String(characters[index]) : "—"
+    }
+  }
+
+  var body: some View {
+    VStack(spacing: 14) {
+      HStack(spacing: 10) {
+        ForEach(Array(digits.enumerated()), id: \.offset) { _, digit in
+          Text(digit)
+            .font(.system(size: 42, weight: .bold, design: .monospaced))
+            .frame(width: 64, height: 76)
+            .background(.quaternary)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+        }
+      }
+      Text(I18n.text("accessCode.instruction", language: languageStore.selected))
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(.secondary)
+      Button(action: onRegenerate) {
+        Text(I18n.text("confirm.newCodeAction", language: languageStore.selected))
+          .foregroundStyle(isRegenerateHovered ? LumenTheme.text : LumenTheme.accentHi)
+          .underline(isRegenerateHovered)
+      }
+      .buttonStyle(.plain)
+      .onHover { hovering in
+        isRegenerateHovered = hovering
+        if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+      }
+    }
+    .frame(maxWidth: .infinity)
+  }
+}
+
+private struct QRCodeView: View {
+  let value: String
+
+  var body: some View {
+    Group {
+      if let image = makeImage(from: value) {
+        Image(nsImage: image)
+          .interpolation(.none)
+          .resizable()
+          .scaledToFit()
+      } else {
+        Image(systemName: "qrcode")
+          .font(.system(size: 58))
+          .foregroundStyle(.secondary)
+      }
+    }
+    .padding(10)
+    .background(.white)
+    .clipShape(RoundedRectangle(cornerRadius: 10))
+  }
+
+  private func makeImage(from value: String) -> NSImage? {
+    let filter = CIFilter.qrCodeGenerator()
+    filter.message = Data(value.utf8)
+    filter.correctionLevel = "M"
+    guard let output = filter.outputImage else { return nil }
+
+    let scaled = output.transformed(by: CGAffineTransform(scaleX: 8, y: 8))
+    let context = CIContext()
+    guard let cgImage = context.createCGImage(scaled, from: scaled.extent) else { return nil }
+    return NSImage(cgImage: cgImage, size: NSSize(width: scaled.extent.width, height: scaled.extent.height))
+  }
+}
+
+private struct ReleaseNotesView: View {
+  @Environment(\.dismiss) private var dismiss
+  @EnvironmentObject private var languageStore: LanguageStore
+  let release: LumenRelease
+
+  private var renderedNotes: [ReleaseNotesBlock] {
+    ReleaseNotesParser.parse(release.notes)
+  }
+
+  @ViewBuilder
+  private func noteBlock(_ block: ReleaseNotesBlock) -> some View {
+    switch block {
+    case .heading(let level, let content):
+      Text(content)
+        .font(level == 1 ? .title3.weight(.semibold) : .headline)
+        .accessibilityAddTraits(.isHeader)
+        .padding(.top, 4)
+    case .paragraph(let content):
+      Text(content)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    case .listItem(let marker, let content):
+      HStack(alignment: .firstTextBaseline, spacing: 8) {
+        Text(marker)
+        Text(content)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
+    }
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      HStack {
+        VStack(alignment: .leading, spacing: 4) {
+          Text(I18n.text("release.changed", language: languageStore.selected))
+            .font(.title2.bold())
+          Text("Lumen \(release.tag)")
+            .foregroundStyle(.secondary)
+        }
+        Spacer()
+        Button(I18n.text("release.close", language: languageStore.selected)) {
+          dismiss()
+        }
+        .buttonStyle(.bordered)
+      }
+
+      ScrollView {
+        VStack(alignment: .leading, spacing: 10) {
+          ForEach(renderedNotes.indices, id: \.self) { index in
+            noteBlock(renderedNotes[index])
+          }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .textSelection(.enabled)
+      }
+    }
+    .padding(24)
+    .frame(width: 560, height: 420)
+  }
+}
+
+struct MenuBarView: View {
+  @Environment(\.openWindow) private var openWindow
+  @EnvironmentObject private var store: DockStore
+  @EnvironmentObject private var server: ServerManager
+  @EnvironmentObject private var updater: LumenUpdateManager
+  @EnvironmentObject private var languageStore: LanguageStore
+
+  private var appVersion: String {
+    (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.1.0"
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack(spacing: 10) {
+        Text(I18n.text("menu.device", language: languageStore.selected, ["count": "\(store.devices)"]))
+        Text(I18n.text("menu.pinned", language: languageStore.selected, ["count": "\(store.pinned.count)"]))
+      }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      if let note = store.lastSyncNote {
+        Text(note)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+      Divider()
+      Button {
+        openWindow(id: "main")
+      } label: {
+        Label(I18n.text("menu.open", language: languageStore.selected), systemImage: "macwindow")
+      }
+      Button {
+        Task { await store.refreshAll() }
+      } label: {
+        Label(I18n.text("menu.sync", language: languageStore.selected), systemImage: "arrow.triangle.2.circlepath")
+      }
+      if let release = updater.release {
+        Divider()
+        Text(I18n.text("menu.update", language: languageStore.selected, ["version": release.tag]))
+          .font(.caption.weight(.semibold))
+        Button {
+          Task { await updater.downloadAndInstall() }
+        } label: {
+          Label(I18n.text("updates.install", language: languageStore.selected), systemImage: "arrow.down.circle")
+        }
+        .disabled(updater.isBusy)
+      } else {
+        Button {
+          Task { await updater.check() }
+        } label: {
+          Label(I18n.text("updates.check", language: languageStore.selected), systemImage: "arrow.down.circle")
+        }
+        .disabled(updater.isBusy)
+      }
+      Divider()
+      Button {
+        server.stop()
+        NSApplication.shared.terminate(nil)
+      } label: {
+        Label(I18n.text("menu.quit", language: languageStore.selected), systemImage: "power")
+      }
+      Divider()
+      Button {} label: {
+        HStack(alignment: .center, spacing: 0) {
+          Text(I18n.text("menu.version", language: languageStore.selected, ["version": appVersion]))
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: true, vertical: false)
+          Spacer(minLength: 12)
+          Text("Lumen")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .frame(width: 250, alignment: .leading)
+      }
+      .buttonStyle(.plain)
+      .disabled(true)
+    }
+    .padding(8)
+    .frame(minWidth: 250)
+  }
+}

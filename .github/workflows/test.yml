@@ -1,0 +1,70 @@
+name: Testes
+
+# A suíte Node roda em todo PR e em todo push para os branches integradores.
+# O `pull_request` já cobre os branches de trabalho assim que existe um PR; por
+# isso `push` fica restrito a develop/main — em um branch com PR aberto os dois
+# gatilhos disparariam e a mesma suíte rodaria duas vezes.
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+  push:
+    branches:
+      - develop
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Um push novo no mesmo PR cancela a execução anterior.
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # macOS, não ubuntu: `npm ci` falha no Linux com EBADPLATFORM porque
+    # ds-store -> macos-alias declara "os": ["darwin"]. O repositório é público,
+    # então o runner macOS não consome cota. Ver nota no fim do arquivo.
+    runs-on: macos-latest
+    # A suíte leva ~8-10 min; a margem cobre o download dos navegadores e um
+    # runner lento sem deixar um teste travado queimar a cota por 6 horas.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+          cache: npm
+
+      - run: npm ci
+
+      # Os testes usam os dois: o chromium empacotado e o canal "chrome"
+      # (chromium.launch({ channel: "chrome" }) em ui.test.mjs,
+      # connection-notice-ui.test.mjs e rebrand-localstorage-migration.test.mjs).
+      # Instalar só o chromium deixa esses três arquivos falhando.
+      - name: Install browsers used by the tests
+        run: npx playwright install chromium chrome
+
+      # O isolamento de HOME por processo de teste vem do script `test` do
+      # package.json (`node --test --import ./support/isolated-home.mjs`), que é
+      # o mesmo caminho usado pelos workflows de macOS. Sem ele os ~45 processos
+      # paralelos disputam o mesmo diretório de dados.
+      #
+      # LUMEN_SKIP_DMG_FIXTURE: este job não empacota DMG; pular o fixture evita
+      # disputar mac/.build e mac/dist e corta vários minutos. A cobertura do DMG
+      # continua em macos-dmg.yml, que empacota e inspeciona o artefato real.
+      - name: Run project tests
+        env:
+          LUMEN_SKIP_DMG_FIXTURE: "1"
+        run: npm test
+
+# Para mover este job para ubuntu-latest (mais barato e mais rápido), ds-store
+# precisa sair de devDependencies para optionalDependencies: ele só é usado por
+# mac/write-dmg-ds-store.mjs, chamado apenas por mac/package-dmg.sh. Validado em
+# container Linux x86_64: com essa mudança `npm ci` e
+# `npx playwright install --with-deps chromium chrome` passam. A suíte em si não
+# foi validada no Linux.

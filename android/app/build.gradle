@@ -1,0 +1,94 @@
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+
+def releaseSigningKeys = [
+    "LUMEN_RELEASE_STORE_FILE",
+    "LUMEN_RELEASE_STORE_PASSWORD",
+    "LUMEN_RELEASE_KEY_ALIAS",
+    "LUMEN_RELEASE_KEY_PASSWORD"
+]
+
+def releaseSigningValue = { String name ->
+    providers.gradleProperty(name).orNull ?: providers.environmentVariable(name).orNull
+}
+
+def releaseSigningValues = releaseSigningKeys.collectEntries { name ->
+    [(name): releaseSigningValue(name)]
+}
+def releaseSigningConfigured = releaseSigningValues.values().every { it != null && !it.trim().isEmpty() }
+def releaseSigningPartiallyConfigured = releaseSigningValues.values().any { it != null && !it.trim().isEmpty() } && !releaseSigningConfigured
+
+if (releaseSigningPartiallyConfigured) {
+    throw new GradleException(
+        "Assinatura release incompleta. Configure os quatro valores LUMEN_RELEASE_*; " +
+            "nenhum segredo deve ser commitado."
+    )
+}
+
+android {
+    namespace = "com.lumen.app"
+    compileSdk = 34
+
+    defaultConfig {
+        applicationId = "com.lumen.app"
+        minSdk = 21
+        targetSdk = 34
+        versionCode = 1
+        versionName = "0.1.0"
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = "17" }
+    buildFeatures { buildConfig = true }
+
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = file(releaseSigningValues["LUMEN_RELEASE_STORE_FILE"])
+                storePassword = releaseSigningValues["LUMEN_RELEASE_STORE_PASSWORD"]
+                keyAlias = releaseSigningValues["LUMEN_RELEASE_KEY_ALIAS"]
+                keyPassword = releaseSigningValues["LUMEN_RELEASE_KEY_PASSWORD"]
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            if (releaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
+    }
+}
+
+def verifyLumenReleaseSigning = tasks.register("verifyLumenReleaseSigning") {
+    doLast {
+        if (!releaseSigningConfigured) {
+            throw new GradleException(
+                "Release Android bloqueado: keystore ausente. Configure LUMEN_RELEASE_STORE_FILE, " +
+                    "LUMEN_RELEASE_STORE_PASSWORD, LUMEN_RELEASE_KEY_ALIAS e LUMEN_RELEASE_KEY_PASSWORD."
+            )
+        }
+        def storeFile = file(releaseSigningValues["LUMEN_RELEASE_STORE_FILE"])
+        if (!storeFile.isFile()) {
+            throw new GradleException("Release Android bloqueado: keystore não encontrada em ${storeFile.absolutePath}")
+        }
+    }
+}
+
+tasks.matching {
+    it.name == "assembleRelease" || it.name == "bundleRelease"
+}.configureEach {
+    dependsOn(verifyLumenReleaseSigning)
+}
+
+dependencies {
+    implementation("androidx.core:core-ktx:1.12.0")
+    implementation("androidx.activity:activity-ktx:1.8.2")
+    testImplementation("junit:junit:4.13.2")
+}

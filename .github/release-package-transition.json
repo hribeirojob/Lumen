@@ -1,0 +1,8 @@
+{
+  "tag": "v0.1.0",
+  "fromPackage": "com.dokke.app",
+  "toPackage": "com.lumen.app",
+  "previousApkAsset": "dokke.apk",
+  "removeAfterTag": "v0.1.0",
+  "reason": "Rebrand Dokke -> Lumen: one-time application ID and APK asset rename. The signing key is unchanged and is still compared strictly. PENDENCIA: apagar este arquivo logo depois que a release v0.1.0 for publicada. Enquanto ele existir com tag igual a uma release futura, o guard de troca de applicationId fica desarmado para aquela tag; o guard de assinatura do APK continua valendo de qualquer forma."
+}

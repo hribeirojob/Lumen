@@ -1,0 +1,24 @@
+{
+  "name": "lumen",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "portless": { "name": "lumen", "script": "start" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test --import ./support/isolated-home.mjs",
+    "mac:install": "cd mac && ./install.sh",
+    "mac:open": "cd mac && ./install.sh --open",
+    "mac:dev": "bash mac/dev.sh"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "ws": "^8.21.1"
+  },
+  "devDependencies": {
+    "ds-store": "^0.1.6",
+    "playwright": "^1.62.1"
+  }
+}

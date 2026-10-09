@@ -1,0 +1,114 @@
+import Foundation
+import Combine
+
+enum LumenLanguage: String, CaseIterable, Identifiable {
+  case portuguese = "pt-BR"
+  case english = "en"
+
+  var id: String { rawValue }
+  var displayName: String {
+    switch self {
+    case .portuguese: return "Português"
+    case .english: return "English"
+    }
+  }
+}
+
+final class LanguageStore: ObservableObject {
+  static let defaultsKey = "lumen_language"
+
+  @Published private(set) var selected: LumenLanguage
+  private let defaults: UserDefaults
+
+  init(defaults: UserDefaults = .standard, preferredLanguages: [String] = Locale.preferredLanguages) {
+    self.defaults = defaults
+    if let saved = defaults.string(forKey: Self.defaultsKey),
+       let language = LumenLanguage(rawValue: saved) {
+      selected = language
+    } else if preferredLanguages.first?.lowercased().hasPrefix("pt") == true {
+      selected = .portuguese
+    } else {
+      selected = .english
+    }
+  }
+
+  func select(_ language: LumenLanguage) {
+    guard selected != language else {
+      defaults.set(language.rawValue, forKey: Self.defaultsKey)
+      return
+    }
+    selected = language
+    defaults.set(language.rawValue, forKey: Self.defaultsKey)
+  }
+}
+
+enum I18n {
+  static func text(_ key: String, language: LumenLanguage) -> String {
+    let value = language == .english ? english[key] : portuguese[key]
+    return value ?? key
+  }
+
+  static func text(_ key: String, language: LumenLanguage, _ values: [String: String]) -> String {
+    values.reduce(text(key, language: language)) { result, pair in
+      result.replacingOccurrences(of: "{" + pair.key + "}", with: pair.value)
+    }
+  }
+
+  static func currentLanguage(defaults: UserDefaults = .standard) -> LumenLanguage {
+    if let saved = defaults.string(forKey: LanguageStore.defaultsKey),
+       let language = LumenLanguage(rawValue: saved) {
+      return language
+    }
+    return Locale.preferredLanguages.first?.lowercased().hasPrefix("pt") == true ? .portuguese : .english
+  }
+
+  private static let portuguese: [String: String] = [
+    "aria.language": "Idioma",
+    "sidebar.slots": "Slots", "sidebar.connect": "Conectar", "sidebar.hide": "Ocultar sidebar", "sidebar.show": "Mostrar sidebar",
+    "sidebar.selected": "Selecionado", "connect.title": "Conectar outro dispositivo", "connect.description": "Use o código abaixo no app ou navegador que você quer conectar ao Lumen.",
+    "connect.accessCode": "Código de acesso", "connect.openOther": "Abrir em outro dispositivo", "connect.scan": "Escaneie ou abra este endereço",
+    "connect.copyURL": "Copiar URL", "connect.open": "Abrir", "connect.network": "O Mac e o dispositivo precisam estar na mesma rede. Para iPhone/iPad, use uma URL HTTPS do túnel antes de adicionar à Tela de Início.",
+    "connect.noIP": "Sem IP de rede detectado (offline?)", "connect.online": "Servidor online", "connect.offline": "Servidor offline", "connect.devices": "{count} dispositivos", "connect.pinned": "{count} fixados",
+    "updates.title": "Atualizações", "updates.new": "Nova versão {version}", "updates.changes": "Mudanças", "updates.install": "Baixar e instalar", "updates.installed": "Versão instalada: {version}", "updates.check": "Verificar atualizações",
+    "confirm.newCode": "Gerar novo código?", "confirm.newCodeAction": "Gerar novo código", "confirm.cancel": "Cancelar", "confirm.newCodeMessage": "Os dispositivos conectados precisarão digitar o novo código.",
+    "accessCode.instruction": "Digite este código no dispositivo conectado", "release.changed": "O que mudou", "release.close": "Fechar",
+    "menu.device": "Dispositivo: {count}", "menu.pinned": "Fixados: {count}", "menu.open": "Abrir Lumen", "menu.sync": "Sincronizar agora", "menu.update": "Atualização {version} disponível", "menu.quit": "Sair", "menu.version": "Versão {version}",
+    "grid.drag": "Arraste para mover um ícone de posição.", "grid.page": "Página {page}", "grid.reorder.done": "Concluir", "grid.reorder": "Reorganizar apps", "grid.reorderHelp": "Concluir reorganização", "grid.offline": "Servidor Offline", "grid.offlineDescription": "Inicie o servidor Lumen e verifique a conexão na aba Conectar.",
+    "grid.add": "Adicionar app na posição {position}", "grid.move": "Mover app para a posição {position}", "grid.limit": "Limite de 5 páginas atingido", "grid.addHere": "Adicionar app nesta posição",
+    "picker.type": "Tipo de peça", "picker.apps": "Apps", "picker.websites": "Website Links", "picker.close": "Fechar", "picker.library": "App Library", "picker.search": "Buscar apps...", "picker.limit": "Limite de 5 páginas atingido. Remova uma peça para adicionar outra.", "picker.loading": "Carregando apps…", "picker.none": "Nenhum app encontrado", "picker.noResults": "Sem resultados", "picker.serverEmpty": "O servidor não retornou apps instalados.", "picker.searchDifferent": "Tente uma busca diferente.", "picker.url": "https://exemplo.com", "picker.add": "Adicionar", "picker.suggestions": "Sugestões", "picker.added": "Adicionado", "picker.nameHint": "Vamos dar um nome curto para o seu weblink.", "picker.siteName": "Nome do site",
+    "icon.remove": "Remover", "icon.removeWebsite": "Remover site fixado", "icon.removeApp": "Remover app fixado", "icon.move": "Mover", "icon.removeDock": "Remover do Dock",
+    "update.checking": "Verificando atualizações...", "update.available": "Nova versão disponível.", "update.downloading": "Baixando a atualização...", "update.installing": "Instalando a atualização...", "update.current": "Você está na versão mais recente.",
+    "update.errorNetwork": "O GitHub não respondeu corretamente.", "update.errorInvalidRelease": "A release não contém um instalador macOS válido.", "update.errorDownload": "Não foi possível baixar a atualização.", "update.errorMissingApp": "O instalador não contém o Lumen.app.", "update.errorNotInstalled": "O Lumen precisa estar instalado como um aplicativo para ser atualizado.", "update.errorPermission": "Sem permissão para atualizar a pasta do Lumen. Mova o app para Aplicativos e tente novamente.", "update.errorChecksum": "A assinatura do download não confere com a release.", "update.errorMount": "Não foi possível montar o instalador.", "update.errorProcess": "Falha ao executar o instalador.",
+    "error.PINNED_LIMIT_REACHED": "Limite de 5 páginas atingido", "error.REVISION_CONFLICT": "A configuração mudou; recarregue e tente novamente", "error.MIXED_PIECES_REQUIRES_NEW_CLIENT": "Essa configuração exige um cliente atualizado", "error.INVALID_PIECE_POSITION": "Posição inválida", "error.PIECE_SLOT_OCCUPIED": "Essa posição do dock já está ocupada", "error.INVALID_WEBSITE": "Website inválido", "error.PIECE_NOT_WEBSITE": "A peça não é um website", "error.PIECE_NOT_FOUND": "Peça não encontrada", "error.INVALID_REQUEST": "Solicitação inválida", "error.network": "Não foi possível conectar ao Lumen.", "error.server": "O servidor Lumen retornou um erro.", "error.health": "O servidor Lumen não respondeu corretamente.", "error.pin": "Falha ao fixar o app.", "error.remove": "Falha ao remover.", "error.openWebsite": "Não foi possível abrir o site.", "error.addWebsite": "Não foi possível adicionar o site.", "error.saveOrder": "Não foi possível salvar a ordem.", "error.generateCode": "Não foi possível gerar o código. O servidor está no ar?", "error.invalidURL": "URL inválida", "error.missingNode": "Node ou server.js não foi encontrado. Reinstale o Lumen pelo DMG mais recente.", "error.portConflict": "A porta 3000 já está ocupada por um serviço incompatível.", "error.portUnknown": "A porta 3000 está ocupada, mas o serviço não pôde ser identificado com segurança.", "error.serverExited": "O servidor encerrou inesperadamente. Veja /tmp/lumen-server.log.", "error.start": "Não foi possível iniciar o servidor.", "error.restartLimit": "O servidor falhou várias vezes e foi interrompido. Veja /tmp/lumen-server.log.",
+    "picker.shortcuts": "Atalhos", "picker.shortcutSearch": "Buscar atalhos...", "picker.shortcutsLoading": "Carregando atalhos…", "picker.shortcutNone": "Nenhum atalho encontrado", "picker.shortcutsEmpty": "O Mac não retornou atalhos disponíveis.", "picker.chooseEmoji": "Escolher emoji", "picker.shortcutEmojiHint": "Escolha um emoji para o atalho",
+    "icon.removeShortcut": "Remover atalho fixado",
+    "error.HTTPS_REQUIRED": "Para executar atalhos fora da rede local, acesse o Lumen por HTTPS.",
+    "error.INVALID_SHORTCUT": "Atalho ou emoji inválido", "error.SHORTCUT_NOT_FOUND": "Esse atalho não está mais disponível no Mac.", "error.SHORTCUT_ALREADY_RUNNING": "Este atalho já está em execução no Mac.", "error.shortcuts": "Não foi possível carregar os atalhos do Mac.", "error.openShortcut": "Não foi possível acionar o atalho no Mac.", "error.addShortcut": "Não foi possível adicionar o atalho.",
+    "sync.sent": "Enviado a {count} dispositivo{suffix}", "sync.savedNoDevice": "Salvo — nenhum dispositivo conectado ainda (abra o Lumen no celular)",
+  ]
+
+  private static let english: [String: String] = [
+    "aria.language": "Language",
+    "sidebar.slots": "Slots", "sidebar.connect": "Connect", "sidebar.hide": "Hide sidebar", "sidebar.show": "Show sidebar",
+    "sidebar.selected": "Selected", "connect.title": "Connect another device", "connect.description": "Use the code below in the app or browser you want to connect to Lumen.",
+    "connect.accessCode": "Access code", "connect.openOther": "Open on another device", "connect.scan": "Scan or open this address",
+    "connect.copyURL": "Copy URL", "connect.open": "Open", "connect.network": "Your Mac and device must be on the same network. For iPhone/iPad, use an HTTPS tunnel URL before adding it to the Home Screen.",
+    "connect.noIP": "No network IP detected (offline?)", "connect.online": "Server online", "connect.offline": "Server offline", "connect.devices": "{count} devices", "connect.pinned": "{count} pinned",
+    "updates.title": "Updates", "updates.new": "New version {version}", "updates.changes": "Changes", "updates.install": "Download and install", "updates.installed": "Installed version: {version}", "updates.check": "Check for updates",
+    "confirm.newCode": "Generate a new code?", "confirm.newCodeAction": "Generate new code", "confirm.cancel": "Cancel", "confirm.newCodeMessage": "Connected devices will need to enter the new code.",
+    "accessCode.instruction": "Enter this code on the connected device", "release.changed": "What changed", "release.close": "Close",
+    "menu.device": "Device: {count}", "menu.pinned": "Pinned: {count}", "menu.open": "Open Lumen", "menu.sync": "Sync now", "menu.update": "Update {version} available", "menu.quit": "Quit", "menu.version": "Version {version}",
+    "grid.drag": "Drag to move an icon.", "grid.page": "Page {page}", "grid.reorder.done": "Done", "grid.reorder": "Reorder apps", "grid.reorderHelp": "Finish reordering", "grid.offline": "Server Offline", "grid.offlineDescription": "Start the Lumen server and check the connection in the Connect tab.",
+    "grid.add": "Add app at position {position}", "grid.move": "Move app to position {position}", "grid.limit": "Limit of 5 pages reached", "grid.addHere": "Add app in this position",
+    "picker.type": "Piece type", "picker.apps": "Apps", "picker.websites": "Website Links", "picker.close": "Close", "picker.library": "App Library", "picker.search": "Search apps...", "picker.limit": "Limit of 5 pages reached. Remove a piece to add another.", "picker.loading": "Loading apps…", "picker.none": "No app found", "picker.noResults": "No results", "picker.serverEmpty": "The server returned no installed apps.", "picker.searchDifferent": "Try a different search.", "picker.url": "https://example.com", "picker.add": "Add", "picker.suggestions": "Suggestions", "picker.added": "Added", "picker.nameHint": "Let's give your weblink a short name.", "picker.siteName": "Site name",
+    "icon.remove": "Remove", "icon.removeWebsite": "Remove pinned site", "icon.removeApp": "Remove pinned app", "icon.move": "Move", "icon.removeDock": "Remove from Dock",
+    "update.checking": "Checking for updates...", "update.available": "New version available.", "update.downloading": "Downloading update...", "update.installing": "Installing update...", "update.current": "You are up to date.",
+    "update.errorNetwork": "GitHub did not respond correctly.", "update.errorInvalidRelease": "The release does not contain a valid macOS installer.", "update.errorDownload": "The update could not be downloaded.", "update.errorMissingApp": "The installer does not contain Lumen.app.", "update.errorNotInstalled": "Lumen must be installed as an application to update.", "update.errorPermission": "You do not have permission to update Lumen's folder. Move the app to Applications and try again.", "update.errorChecksum": "The download signature does not match the release.", "update.errorMount": "The installer could not be mounted.", "update.errorProcess": "The installer could not be executed.",
+    "error.PINNED_LIMIT_REACHED": "Limit of 5 pages reached", "error.REVISION_CONFLICT": "The configuration changed; reload and try again", "error.MIXED_PIECES_REQUIRES_NEW_CLIENT": "This configuration requires an updated client", "error.INVALID_PIECE_POSITION": "Invalid position", "error.PIECE_SLOT_OCCUPIED": "That dock position is already occupied", "error.INVALID_WEBSITE": "Invalid website", "error.PIECE_NOT_WEBSITE": "This piece is not a website", "error.PIECE_NOT_FOUND": "Piece not found", "error.INVALID_REQUEST": "Invalid request", "error.network": "Could not connect to Lumen.", "error.server": "The Lumen server returned an error.", "error.health": "The Lumen server did not respond correctly.", "error.pin": "Failed to pin the app.", "error.remove": "Failed to remove.", "error.openWebsite": "Could not open the website.", "error.addWebsite": "Could not add the website.", "error.saveOrder": "Could not save the order.", "error.generateCode": "Could not generate the code. Is the server running?", "error.invalidURL": "Invalid URL", "error.missingNode": "Node or server.js was not found. Reinstall Lumen from the latest DMG.", "error.portConflict": "Port 3000 is already occupied by an incompatible service.", "error.portUnknown": "Port 3000 is occupied, but the service could not be identified safely.", "error.serverExited": "The server exited unexpectedly. See /tmp/lumen-server.log.", "error.start": "Could not start the server.", "error.restartLimit": "The server failed repeatedly and was stopped. See /tmp/lumen-server.log.",
+    "picker.shortcuts": "Shortcuts", "picker.shortcutSearch": "Search shortcuts...", "picker.shortcutsLoading": "Loading shortcuts…", "picker.shortcutNone": "No shortcut found", "picker.shortcutsEmpty": "The Mac returned no available shortcuts.", "picker.chooseEmoji": "Choose an emoji", "picker.shortcutEmojiHint": "Pick an emoji for your shortcut",
+    "icon.removeShortcut": "Remove pinned shortcut",
+    "error.HTTPS_REQUIRED": "To run shortcuts outside the local network, open Lumen over HTTPS.",
+    "error.INVALID_SHORTCUT": "Invalid shortcut or emoji", "error.SHORTCUT_NOT_FOUND": "That shortcut is no longer available on the Mac.", "error.SHORTCUT_ALREADY_RUNNING": "This shortcut is already running on the Mac.", "error.shortcuts": "Could not load Mac shortcuts.", "error.openShortcut": "Could not run the shortcut on the Mac.", "error.addShortcut": "Could not add the shortcut.",
+    "sync.sent": "Sent to {count} device{suffix}", "sync.savedNoDevice": "Saved — no device connected yet (open Lumen on your phone)",
+  ]
+}
