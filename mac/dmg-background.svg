@@ -1,5 +1,41 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400" viewBox="0 0 640 400">
-  <rect width="640" height="400" fill="#f5f5f7"/>
-  <path d="M300 210 H420" fill="none" stroke="#27272a" stroke-width="8" stroke-linecap="round"/>
-  <path d="M394 188 L420 210 L394 232" fill="none" stroke="#27272a" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+<!-- Fundo da janela do DMG. Fonte do mac/dmg-background.png — regenerar com
+     `node tools/render-dmg-background.mjs`, nunca editar o PNG na mão.
+
+     A janela é 640x378 (write-dmg-ds-store.mjs) e a arte é 640x400: os 22px de
+     baixo ficam fora. Nada essencial abaixo de y=378.
+
+     Os ícones são 96px, centrados em (170,210) e (570,210), com o rótulo logo
+     abaixo. Isso reserva x 110–230 e x 510–630 até y~295: essas faixas ficam
+     praticamente lisas de propósito, senão o Finder desenha ícone e nome por
+     cima de arte e os dois perdem. Toda a identidade vive no miolo, entre eles.
+
+     Fundo claro, não escuro: o Finder desenha os rótulos com a cor do sistema,
+     que a imagem não acompanha — fundo escuro deixa o nome ilegível em tema
+     claro. Mesma razão pela qual o original era cinza. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400" viewBox="0 0 640 400" role="img" aria-label="Arraste o Lumen para a pasta Aplicativos">
+  <defs>
+    <linearGradient id="dmg-wash" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F7F0FC"/>
+      <stop offset="0.62" stop-color="#FCF9FE"/>
+      <stop offset="1" stop-color="#FFFFFF"/>
+    </linearGradient>
+    <!-- eco do bloom do Halo, atrás da seta. Fraco de propósito: marca a
+         direção sem disputar atenção com os dois ícones. -->
+    <radialGradient id="dmg-bloom" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#AD56D3" stop-opacity="0.13"/>
+      <stop offset="0.55" stop-color="#AD56D3" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#AD56D3" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="640" height="400" fill="url(#dmg-wash)"/>
+  <circle cx="360" cy="210" r="124" fill="url(#dmg-bloom)"/>
+
+  <!-- seta: mesma geometria do fundo original, que já estava certa — y=210
+       alinha com o centro dos ícones e o vão x 300–420 não encosta em nenhum
+       dos dois. Só a cor saiu do cinza para o accent da escala. -->
+  <g fill="none" stroke="#8F3DAF" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M300 210 H420"/>
+    <path d="M394 188 L420 210 L394 232"/>
+  </g>
 </svg>
