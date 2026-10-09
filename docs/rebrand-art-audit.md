@@ -170,14 +170,17 @@ funcionou ali.
 
 ## Pendências conhecidas
 
-- **`actool` está quebrado nesta máquina — e isso não é cosmético.** Ele falha na
-  inicialização até em `actool --version` ("A required plugin failed to load",
-  "ibtoold failed IDE initialization"), inclusive no template de ícone da própria
-  Apple, o que prova que é ambiente e não a nossa arte. Conserto:
-  `sudo xcodebuild -runFirstLaunch` (precisa de admin). **Colateral:** enquanto
-  isso, `mac/install.sh` cai no fallback do `.icns` legado e o ícone adaptativo do
-  Icon Composer **nunca compila nesta máquina** — o Mac mostra o ícone antigo mesmo
-  com a arte nova no repo. A suíte não depende de `actool` de propósito.
+- ~~`actool` quebrado~~ **resolvido em 2026-10-09.** Ele falhava na inicialização
+  até em `actool --version` ("A required plugin failed to load" / "ibtoold failed
+  IDE initialization"), e com isso `mac/install.sh` caía no fallback do `.icns`
+  legado — o ícone adaptativo nunca chegava a compilar. O conserto é
+  `xcodebuild -runFirstLaunch`, e **não precisa de sudo**: roda como usuário comum
+  (a mensagem de erro não diz isso, e a suposição de que exigia admin custou um
+  dia). Validado depois disso: o documento compila sem erro nem warning, e o
+  `Assets.car` resultante traz `NSAppearanceNameAqua`, `NSAppearanceNameDarkAqua`
+  e `ISAppearanceTintable`, mais duas entradas `Named Gradient` — que é o nosso
+  `fill` atravessando o compilador da Apple. A suíte continua sem depender de
+  `actool` de propósito.
 - Toda a arte binária do Dokke foi substituída. Nenhum binário continha a string
   "Dokke"; o risco era puramente visual e está fechado.
 - `test/brand-icon-assets.test.mjs` passou a medir geometria em vez de travar sha256, e
